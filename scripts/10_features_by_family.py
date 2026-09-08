@@ -13,12 +13,23 @@ widest acquisitions the head occupies about 1% of the array, which is precisely 
 centre-of-mass cropping has the least margin for error. So the hypothesis is that the worst
 family is worst because its crops are worse, not because its images are.
 
-The measurement
----------------
-The sharpest indicator is already sitting in the feature table: **`box_max / global_max`**.
-The central box is where the striatum should be after COM cropping, so if the crop landed
-correctly the brightest voxel in the whole volume is inside it and the ratio is ~1. A ratio well
-below 1 means the peak uptake is somewhere else entirely — the crop missed.
+The measurement, and what confounds it
+--------------------------------------
+The indicator is already sitting in the feature table: **`box_max / global_max`**. The central
+box is where the striatum should be after COM cropping, so if the crop landed correctly the
+brightest voxel in the whole volume is inside it and the ratio is ~1. A ratio well below 1 means
+the peak uptake is somewhere else entirely — the crop missed.
+
+**That reading is wrong on its own, and the first run of this script showed why.** In a
+pathologic scan striatal uptake is *reduced*, so the brightest voxel is more often outside the
+box for reasons that have nothing to do with cropping. The ratio is therefore confounded with
+the label, and the confound is large: across families the 5th-percentile ratio tracks positive
+rate almost monotonically, from 1.000 at a 46.3% positive rate down to 0.504 at 62.1%.
+
+So the ratio is reported **stratified by label**. A family whose crops are genuinely worse
+should look worse within the negatives, where every striatum is bright and the peak belongs in
+the box. A family that only looks worse overall is a family with sicker patients, and its lower
+AUROC is not a preprocessing bug.
 
 This runs on the CSV `08_sbr_features.py` already wrote. No volumes are re-read and nothing is
 re-preprocessed, so it costs seconds.
@@ -88,6 +99,13 @@ def summarise_by_family(df: pd.DataFrame, min_group_n: int) -> pd.DataFrame:
             if column in sub:
                 row[f"{column}_p50"] = float(sub[column].median())
                 row[f"{column}_p05"] = float(sub[column].quantile(0.05))
+        if "is_pathologic" in sub:
+            for label, tag in ((0, "neg"), (1, "pos")):
+                stratum = sub[sub["is_pathologic"] == label]
+                row[f"n_{tag}"] = len(stratum)
+                if len(stratum):
+                    row[f"peak_{tag}_p50"] = float(stratum["peak_in_box"].median())
+                    row[f"peak_{tag}_p05"] = float(stratum["peak_in_box"].quantile(0.05))
         rows.append(row)
 
     return pd.DataFrame(rows).sort_values("n", ascending=False).reset_index(drop=True)
@@ -122,33 +140,65 @@ def build_report(table: pd.DataFrame, n_total: int, min_group_n: int) -> list[st
             f"| {row.get('box_to_shell_p50', float('nan')):.3f} |"
         )
 
-    medians = table["peak_in_box_p50"]
-    worst = table.loc[medians.idxmin()]
-    spread = float(medians.max() - medians.min())
     lines += [
         "",
-        f"- spread in median peak-in-box across families: **{spread:.3f}**",
-        f"- lowest: **{worst['family']}** (n={int(worst['n'])}) at "
-        f"{float(worst['peak_in_box_p50']):.3f}",
+        "## The same ratio, split by label",
         "",
+        "The column above cannot be read on its own: a pathologic striatum is dimmer, so its",
+        "peak leaves the box for reasons unrelated to cropping. **The negatives are the",
+        "diagnostic** — every negative striatum is bright, so the peak belongs in the box, and a",
+        "family whose crops genuinely fail should look worse here.",
+        "",
+        "| family | n- | peak in box, negatives (p05) | n+ | peak in box, positives (p05) |",
+        "|---|---:|---:|---:|---:|",
     ]
-
-    if spread < 0.05:
+    has_labels = "peak_neg_p05" in table.columns
+    if has_labels:
+        for _, row in table.iterrows():
+            lines.append(
+                f"| {row['family']} | {int(row.get('n_neg', 0))} "
+                f"| {row.get('peak_neg_p05', float('nan')):.3f} "
+                f"| {int(row.get('n_pos', 0))} "
+                f"| {row.get('peak_pos_p05', float('nan')):.3f} |"
+            )
+        neg_spread = float(
+            table["peak_neg_p05"].max() - table["peak_neg_p05"].min()
+        )
+        pos_spread = float(
+            table["peak_pos_p05"].max() - table["peak_pos_p05"].min()
+        )
         lines += [
-            "**Verdict: cropping is not the explanation.** Every family places the peak in the",
-            "box about equally well, so the weaker family's weaker AUROC is about its images —",
-            "resolution, noise, reconstruction — not about preprocessing losing the striatum.",
-            "Changing the crop would cost a full retraining run and, on this evidence, buy",
-            "nothing. Accept the difference and spend the compute elsewhere.",
+            "",
+            f"- spread across families within the negatives: **{neg_spread:.3f}**",
+            f"- spread across families within the positives: **{pos_spread:.3f}**",
+            "",
+            "## Verdict",
             "",
         ]
+        if neg_spread < 0.15:
+            lines += [
+                "**Cropping is not the explanation.** Within the negatives — where the striatum",
+                "is bright and the peak belongs in the box — the families agree. The differences",
+                "in the unstratified column are the label confound, not preprocessing. A weaker",
+                "family's weaker AUROC is about its images, and on this hardware that is not",
+                "fixable before the deadline. Do not spend a retraining run on the crop.",
+                "",
+            ]
+        else:
+            lines += [
+                "**Worth investigating.** The families still differ within the negatives, where",
+                "the label confound cannot explain it. Check whether the low ones are the",
+                "wide-field acquisitions — a 256 matrix at 2.5 mm is a 640 mm cube against 307 mm",
+                "for a 128 matrix at 2.4 mm — since that is the mechanism predicted here. A crop",
+                "fix costs a retraining run, so confirm before spending it.",
+                "",
+            ]
     else:
         lines += [
-            "**Verdict: worth investigating.** Families differ materially in how often the crop",
-            "captures peak uptake. Before acting, check whether the low-scoring families are the",
-            "wide-field ones — a 256 matrix at 2.5 mm is a 640 mm cube, against 307 mm for a 128",
-            "matrix at 2.4 mm — because that is the mechanism this predicts. A crop fix requires",
-            "retraining, so confirm the pattern first.",
+            "| (labels unavailable) | | | | |",
+            "",
+            "**Cannot judge.** Without labels the ratio cannot be separated from disease",
+            "severity. Pass a folds file that carries `is_pathologic`.",
             "",
         ]
 
@@ -188,7 +238,11 @@ def main() -> int:
         )
 
     features = add_derived(pd.read_csv(features_path))
-    folds = pd.read_csv(REPO_ROOT / args.folds_csv)[["uid", "acquisition_group"]]
+    folds_all = pd.read_csv(REPO_ROOT / args.folds_csv)
+    columns = ["uid", "acquisition_group"]
+    if "is_pathologic" in folds_all.columns:
+        columns.append("is_pathologic")
+    folds = folds_all[columns]
     df = features.merge(folds, on="uid", how="left")
 
     missing = int(df["acquisition_group"].isna().sum())
