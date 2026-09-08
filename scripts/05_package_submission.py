@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import json
 import re
 import shutil
 import sys
@@ -90,7 +91,11 @@ def check_imports(files: list[Path]) -> list[str]:
 
 # Collections whose size is a property of OUR submission rather than of the test data, and so
 # is safe to log. Keep this list short and justify every addition.
-SAFE_TO_COUNT = {"models", "checkpoints"}
+#
+# `_GBM_BOOSTERS` added 2026-09-08: it holds the lightgbm boosters shipped in the zip, so its
+# length is a property of the submission and cannot vary with the test set. Same category as
+# `models`, whose count provably survived the platform's filter ("Loaded 5 fold models on cuda").
+SAFE_TO_COUNT = {"models", "checkpoints", "_GBM_BOOSTERS"}
 
 
 def check_logging(main_py: Path) -> list[str]:
@@ -185,7 +190,11 @@ def check_independence(main_py: Path) -> list[str]:
     return problems
 
 
-def build(baked: dict[str, object], prior_only: bool = False) -> int:
+def build(
+    baked: dict[str, object],
+    prior_only: bool = False,
+    blend_assets: list[Path] | None = None,
+) -> int:
     if BUILD_DIR.exists():
         shutil.rmtree(BUILD_DIR)
     BUILD_DIR.mkdir(parents=True)
@@ -236,6 +245,16 @@ def build(baked: dict[str, object], prior_only: bool = False) -> int:
         for ckpt in checkpoints:
             shutil.copy2(ckpt, BUILD_DIR / "assets" / ckpt.name)
 
+    # The tree ensemble and its stack metadata, copied from the run directory rather than from
+    # submission_src/assets. Staging them by hand is the step that would silently ship last
+    # week's boosters alongside this week's coefficients.
+    if blend_assets:
+        (BUILD_DIR / "assets").mkdir(exist_ok=True)
+        for asset in blend_assets:
+            shutil.copy2(asset, BUILD_DIR / "assets" / asset.name)
+        if not baked.get("USE_BLEND"):
+            problems.append("blend assets staged but USE_BLEND was not baked")
+
     py_files = sorted(BUILD_DIR.rglob("*.py"))
     problems += check_imports(py_files) + check_independence(main_path)
     problems += check_logging(main_path)
@@ -273,6 +292,12 @@ def build(baked: dict[str, object], prior_only: bool = False) -> int:
     if prior_only:
         print("\nPRIOR-ONLY BUILD: this predicts a constant for every row. Its purpose is to")
         print("prove the platform contract end to end before a model exists, not to score.")
+    if baked.get("USE_BLEND"):
+        n_boosters = len([a for a in (blend_assets or []) if a.name.startswith("gbm_fold")])
+        print(f"\nBLEND IS ON ({n_boosters} boosters).")
+        print("Temperature scaling is NOT applied on this path - the stack's CNN coefficient")
+        print(f"({baked.get('STACK_COEF_CNN'):.4f}) carries the calibration instead.")
+
     views = baked.get("TTA_VIEWS")
     if isinstance(views, tuple) and len(views) > 1:
         print(f"\nTTA IS ON ({len(views)} views).")
@@ -299,6 +324,10 @@ def main() -> int:
                         help="bake the nine-view test-time augmentation set into main.py. "
                              "Only after scripts/07_tta.py shows it helps on OOF, and only "
                              "with a temperature refitted on the TTA predictions.")
+    parser.add_argument("--blend-from", default=None,
+                        help="run directory under models/ holding gbm_fold*.txt and stack.json "
+                             "(written by scripts/09_blend.py). Ships the SBR tree ensemble "
+                             "and bakes the stack coefficients.")
     parser.add_argument("--prior-only", action="store_true",
                         help="package a valid submission with no weights, predicting --fallback "
                              "for every row. Use on day 1 to validate the platform loop.")
@@ -325,6 +354,31 @@ def main() -> int:
         spec.loader.exec_module(tta_module)
         baked["TTA_VIEWS"] = tta_module.VIEW_PRESETS["default"]
 
+    if args.blend_from:
+        if args.temperature is not None:
+            raise SystemExit(
+                "--temperature cannot be combined with --blend-from. "
+                "The stack's own CNN coefficient already absorbs the calibration; applying a "
+                "temperature as well would soften the logits twice and give back most of the "
+                "gain. Drop --temperature."
+            )
+        blend_dir = REPO_ROOT / "models" / args.blend_from
+        stack_path = blend_dir / "stack.json"
+        if not stack_path.exists():
+            raise SystemExit(
+                f"No {stack_path}. Run: python scripts/09_blend.py --run <cnn run>"
+            )
+        meta = json.loads(stack_path.read_text(encoding="utf-8"))
+        baked["USE_BLEND"] = True
+        baked["STACK_INTERCEPT"] = meta["intercept"]
+        baked["STACK_COEF_CNN"] = meta["coef_cnn"]
+        baked["STACK_COEF_GBM"] = meta["coef_gbm"]
+        blend_assets = sorted(blend_dir.glob("gbm_fold*.txt")) + [stack_path]
+        if len(blend_assets) < 2:
+            raise SystemExit(f"No gbm_fold*.txt in {blend_dir}; rerun scripts/09_blend.py")
+    else:
+        blend_assets = []
+
     if args.config:
         # Bake the preprocessing and architecture the weights were actually trained with.
         # Reading them from the config rather than trusting main.py's defaults is what keeps
@@ -342,7 +396,7 @@ def main() -> int:
     elif not args.prior_only:
         raise SystemExit("--config is required unless building with --prior-only")
 
-    return build(baked, prior_only=args.prior_only)
+    return build(baked, prior_only=args.prior_only, blend_assets=blend_assets)
 
 
 if __name__ == "__main__":

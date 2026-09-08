@@ -52,12 +52,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import HistGradientBoostingClassifier
+import lightgbm as lgb
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedKFold
 
@@ -66,16 +67,26 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from datpd.utils.metrics import clip_probs, competition_logloss, summarize  # noqa: E402
 
+# lightgbm, not scikit-learn's HistGradientBoosting, even though the two implement much the
+# same algorithm and sklearn was already installed. The reason is shipping: lightgbm's booster
+# serialises to a plain text format that loads across versions, whereas a scikit-learn estimator
+# ships as a pickle whose compatibility with whatever version the runtime happens to have is not
+# guaranteed. Measuring with one model and shipping another would also mean the number that
+# justified the change was never the number that ships.
+#
 # Deliberately small trees and strong regularisation. n=1362 with ~60 features is a regime where
 # a boosted model will happily memorise; the goal here is a model that DISAGREES usefully with
 # the CNN, not one that squeezes the last drop out of the features.
 GBM_PARAMS = dict(
     max_depth=3,
-    max_iter=300,
+    num_leaves=7,
+    n_estimators=300,
     learning_rate=0.05,
-    min_samples_leaf=30,
-    l2_regularization=1.0,
-    early_stopping=False,
+    min_child_samples=30,
+    reg_lambda=1.0,
+    subsample=1.0,
+    colsample_bytree=0.8,
+    verbose=-1,
 )
 
 
@@ -86,16 +97,24 @@ def to_logit(p: np.ndarray) -> np.ndarray:
 
 def fit_gbm_oof(
     features: pd.DataFrame, y: np.ndarray, folds: np.ndarray, seed: int
-) -> np.ndarray:
-    """Out-of-fold predictions from the tree model, on the CNN's own fold assignment."""
+) -> tuple[np.ndarray, list[lgb.LGBMClassifier]]:
+    """Out-of-fold predictions from the tree model, on the CNN's own fold assignment.
+
+    Returns the fitted fold models as well, because those are what ship. Inference averages all
+    five in logit space, mirroring exactly what `main.py` already does with the CNN's fold
+    checkpoints — and keeping the shipped ensemble the same shape as the one whose out-of-fold
+    predictions the stack coefficients were fitted on.
+    """
     oof = np.full(len(y), np.nan)
-    for fold in np.unique(folds):
+    models = []
+    for fold in sorted(np.unique(folds)):
         train = folds != fold
-        model = HistGradientBoostingClassifier(random_state=seed, **GBM_PARAMS)
+        model = lgb.LGBMClassifier(random_state=seed, **GBM_PARAMS)
         model.fit(features[train], y[train])
         oof[~train] = model.predict_proba(features[~train])[:, 1]
+        models.append(model)
     assert not np.isnan(oof).any(), "every row must be predicted exactly once"
-    return oof
+    return oof, models
 
 
 def fit_stack(logits: np.ndarray, y: np.ndarray) -> LogisticRegression:
@@ -174,7 +193,7 @@ def main() -> int:
     print(f"n = {len(df)}, features = {len(feature_columns)}, folds = {args.fold_column}")
 
     p_cnn = df["oof_pred"].to_numpy()
-    p_gbm = fit_gbm_oof(x, y, fold_ids, args.seed)
+    p_gbm, gbm_models = fit_gbm_oof(x, y, fold_ids, args.seed)
 
     cnn = summarize(y, p_cnn)
     gbm = summarize(y, p_gbm)
@@ -200,6 +219,27 @@ def main() -> int:
     pd.DataFrame(
         {"uid": df["uid"], "is_pathologic": y, "oof_pred": p_blend, "fold": fold_ids}
     ).to_csv(blend_dir / "oof.csv", index=False)
+
+    # --- Artifacts for the submission ------------------------------------------------------
+    # Everything inference needs, written next to the predictions that justify shipping it.
+    # The boosters go out as lightgbm's text format, which loads across library versions; the
+    # stack is three floats and the feature order.
+    final_stack_for_ship = fit_stack(both, y)
+    for i, model in enumerate(gbm_models):
+        model.booster_.save_model(str(blend_dir / f"gbm_fold{i}.txt"))
+
+    stack_meta = {
+        "intercept": float(final_stack_for_ship.intercept_[0]),
+        "coef_cnn": float(final_stack_for_ship.coef_[0][0]),
+        "coef_gbm": float(final_stack_for_ship.coef_[0][1]),
+        # Stored so inference can assert the column order it builds matches the one the trees
+        # were fitted on. A silently permuted feature vector is the failure mode here: it raises
+        # nothing, and produces predictions that are wrong in a way no check would catch.
+        "feature_names": feature_columns,
+        "n_folds": len(gbm_models),
+        "source_run": args.run,
+    }
+    (blend_dir / "stack.json").write_text(json.dumps(stack_meta, indent=2), encoding="utf-8")
 
     final_stack = fit_stack(both, y)
     in_sample = competition_logloss(y, stack_predict(final_stack, both))
@@ -255,9 +295,20 @@ def main() -> int:
         lines += [
             "## Verdict: worth shipping",
             "",
-            "Next: teach `submission_src/main.py` to compute these features per scan and carry",
-            "the fitted model. Refit on lightgbm rather than scikit-learn first — its text",
-            "booster format does not depend on the library version the runtime happens to have.",
+            "Artifacts are written next to the predictions that justify them, in",
+            f"`{args.models_dir}/{args.run}_blend/`: `gbm_fold*.txt` (lightgbm boosters, text",
+            "format, version-portable) and `stack.json` (the three coefficients plus the feature",
+            "order). To build a submission carrying them:",
+            "",
+            "```",
+            f"python scripts/05_package_submission.py --config conf/baseline.yaml"
+            f" --blend-from {args.run}_blend"
+            f" --fallback {y.mean():.4f} --clip-eps 1e-06",
+            "```",
+            "",
+            "`--temperature` is neither needed nor accepted alongside `--blend-from`: the stack's",
+            "own CNN coefficient absorbs the calibration, so passing a temperature as well would",
+            "apply it twice.",
             "",
         ]
     else:

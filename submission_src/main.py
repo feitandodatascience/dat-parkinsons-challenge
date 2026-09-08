@@ -88,6 +88,25 @@ MODEL_DROPOUT = 0.3
 # independence holds.
 TTA_VIEWS = ((0.0, (1, 2), (0, 0, 0), 1.0),)
 
+# Blend with a gradient-boosted model over SBR-style geometric features.
+#
+# DEFAULT IS OFF. With USE_BLEND False nothing below runs, no booster is loaded, and the
+# prediction is exactly the CNN path above. `scripts/05_package_submission.py --blend-from`
+# turns it on and bakes the three stack coefficients, after `scripts/09_blend.py` has shown the
+# features are worth their complexity.
+#
+# When ON, the stack REPLACES temperature scaling rather than composing with it: the fitted
+# CNN coefficient already absorbs the calibration that TEMPERATURE would have applied, so
+# dividing by TEMPERATURE as well would soften the logits twice and give back most of the gain.
+# The packager refuses --temperature alongside --blend-from for that reason.
+#
+# Rules note (CLAUDE.md 1.1): the features are computed from this scan's voxels alone and the
+# boosters are shipped weights, so per-sample independence holds exactly as it does for the CNN.
+USE_BLEND = False
+STACK_INTERCEPT = 0.0
+STACK_COEF_CNN = 1.0
+STACK_COEF_GBM = 0.0
+
 
 def load_models() -> list[torch.nn.Module]:
     """Load every fold checkpoint shipped in `assets/`.
@@ -157,6 +176,56 @@ def _make_view(
     ).astype(np.float32)
 
 
+_GBM_BOOSTERS: list[object] | None = None
+
+
+def _load_boosters() -> list[object]:
+    """Load the shipped lightgbm boosters once, and check the feature order they expect.
+
+    The order check is the important part. A gradient-boosted model is fitted on a column
+    *position*, not a name, so a feature vector assembled in a different order than the one the
+    trees were trained on raises nothing, produces plausible-looking probabilities, and is
+    wrong. `stack.json` records the order used at fit time and this asserts against it.
+    """
+    global _GBM_BOOSTERS
+    if _GBM_BOOSTERS is not None:
+        return _GBM_BOOSTERS
+
+    import json
+
+    import lightgbm as lgb
+
+    from datpd_vendored.features import feature_names
+
+    meta = json.loads((ASSETS_DIR / "stack.json").read_text(encoding="utf-8"))
+    expected = list(meta["feature_names"])
+    actual = feature_names()
+    if actual != expected:
+        raise RuntimeError(
+            "shipped feature order does not match the one the boosters were fitted on "
+            f"({len(actual)} columns here, {len(expected)} recorded)"
+        )
+
+    paths = sorted(ASSETS_DIR.glob("gbm_fold*.txt"))
+    if not paths:
+        raise RuntimeError("USE_BLEND is on but no gbm_fold*.txt were shipped in assets/")
+
+    _GBM_BOOSTERS = [lgb.Booster(model_file=str(p)) for p in paths]
+    logger.info(f"Loaded {len(_GBM_BOOSTERS)} boosters")
+    return _GBM_BOOSTERS
+
+
+def _gbm_logit(array: np.ndarray) -> float:
+    """Mean logit across the tree fold models, mirroring how the CNN folds are combined."""
+    from datpd_vendored.features import feature_vector
+
+    boosters = _load_boosters()
+    row = feature_vector(array).reshape(1, -1)
+    probs = np.array([b.predict(row)[0] for b in boosters], dtype=np.float64)
+    probs = np.clip(probs, CLIP_EPS, 1.0 - CLIP_EPS)
+    return float(np.mean(np.log(probs / (1.0 - probs))))
+
+
 def predict_one(models: list[torch.nn.Module], uid: str) -> float:
     """Predict a calibrated probability for a single examination.
 
@@ -180,10 +249,18 @@ def predict_one(models: list[torch.nn.Module], uid: str) -> float:
         # saturated view or fold cannot drag the ensemble the way probability averaging would.
         logits = [float(model(tensor).float().mean().item()) for model in models]
 
+    cnn_logit = float(np.mean(logits))
+
+    if USE_BLEND:
+        # The stack carries its own calibration in STACK_COEF_CNN; TEMPERATURE is deliberately
+        # not applied here. See the note beside USE_BLEND.
+        gbm_logit = _gbm_logit(array)
+        z = STACK_INTERCEPT + STACK_COEF_CNN * cnn_logit + STACK_COEF_GBM * gbm_logit
+        return float(1.0 / (1.0 + np.exp(-z)))
+
     # Average in logit space, then temperature-scale, then squash. Averaging logits rather
     # than probabilities keeps the ensemble from being dragged by a single saturated member.
-    mean_logit = float(np.mean(logits)) / TEMPERATURE
-    return float(1.0 / (1.0 + np.exp(-mean_logit)))
+    return float(1.0 / (1.0 + np.exp(-cnn_logit / TEMPERATURE)))
 
 
 def main() -> None:
