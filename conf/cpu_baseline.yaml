@@ -1,0 +1,69 @@
+# CPU baseline — the run that gets a real model onto the leaderboard without a GPU.
+#
+# Same pipeline as baseline.yaml, sized so five folds finish overnight on a CPU rather than in
+# two days. The compute saving comes from a smaller FIELD OF VIEW, not from coarser resolution,
+# and that distinction is the whole point of this file.
+#
+#   baseline.yaml     96^3 @ 2.0 mm  = a 192 mm cube   884,736 voxels
+#   this file         64^3 @ 2.0 mm  = a 128 mm cube   262,144 voxels   (30% of the work)
+#
+# The obvious alternative — keeping 192 mm and dropping to 64^3 @ 3.0 mm — costs the same but
+# blurs the structure being classified. The striatum is roughly 60-70 mm across and the
+# putamen's dorsal-to-ventral gradient plays out over millimetres (docs/01 §4), so resolution is
+# the last thing to give up. A 128 mm cube centred on the head still contains the whole striatum
+# with room around it for the reference region.
+#
+# This is a compute compromise, not a modelling recommendation. When GPU time is available, run
+# baseline.yaml and expect it to win.
+
+run_name: cpu_baseline
+seed: 42
+output_dir: models
+
+data:
+  root: data/raw
+  labels_csv: data/raw/train_labels.csv
+  nifti_dir: data/raw/niftis
+  folds_csv: data/interim/folds.csv
+  target_spacing_mm: [2.0, 2.0, 2.0]
+  target_shape: [64, 64, 64]
+  normalization: reference_region
+  # Mandatory here, not optional. At a 128 mm crop there is no margin for a mis-centred head,
+  # and a third of the data has a 630 mm field of view where the head is ~1% of the array.
+  crop: com
+  cache_dir: data/processed/cache
+
+model:
+  name: resnet3d
+  widths: [16, 32, 64, 128]
+  dropout: 0.3
+  in_channels: 1
+
+train:
+  # Fewer epochs than baseline.yaml: early stopping on validation log loss usually fires well
+  # before 30 at this sample size (n=1362), and an epoch is expensive here.
+  epochs: 25
+  batch_size: 8
+  lr: 0.0003
+  weight_decay: 0.0001
+  scheduler: cosine
+  warmup_epochs: 2
+  # AMP is a no-op on CPU; left true so the config differs from baseline.yaml only where it
+  # matters, and so this file can be run unchanged once a GPU is available.
+  amp: true
+  grad_clip: 1.0
+  early_stopping_patience: 6
+  num_workers: 4
+  fold_column: fold_strat
+  folds: [0, 1, 2, 3, 4]
+
+aug:
+  # flip_lr stays false: DaT abnormality is often asymmetric and laterality may be signal.
+  # Run one experiment with it true before deciding.
+  flip_lr: false
+  rotate_degrees: 10.0
+  translate_mm: 5.0
+  scale_range: [0.9, 1.1]
+  intensity_jitter: 0.1
+  noise_std: 0.01
+  mixup_alpha: 0.0

@@ -1,0 +1,38 @@
+# Same model as baseline, scored under grouped CV (acquisition signature as the group).
+#
+# Why run both: `fold_strat` gives the lower-variance number, `fold_group` gives the honest
+# one. If baseline CV logloss is much better than this, the model is exploiting centre-specific
+# artefacts and the leaderboard will not reward it. Trust the gap, not either number alone.
+
+run_name: grouped_cv
+seed: 42
+output_dir: models
+
+data:
+  root: data/raw
+  labels_csv: data/raw/train_labels.csv
+  nifti_dir: data/raw/niftis
+  folds_csv: data/interim/folds.csv
+  target_spacing_mm: [2.0, 2.0, 2.0]
+  target_shape: [96, 96, 96]
+  normalization: reference_region
+  crop: com
+  cache_dir: data/processed/cache
+
+model:
+  name: resnet3d
+  widths: [16, 32, 64, 128]
+  dropout: 0.3
+
+train:
+  epochs: 30
+  batch_size: 8
+  lr: 0.0003
+  scheduler: cosine
+  fold_column: fold_group
+  folds: [0, 1, 2, 3, 4]
+
+aug:
+  flip_lr: false
+  rotate_degrees: 10.0
+  translate_mm: 5.0

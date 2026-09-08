@@ -1,0 +1,75 @@
+# ---------------------------------------------------------------------------
+# COMPETITION DATA - never commit. The rules prohibit redistributing it, and a
+# public repo would do exactly that. This block is a compliance control.
+# ---------------------------------------------------------------------------
+data/
+!data/*/.gitkeep
+*.nii
+*.nii.gz
+*.dcm
+train_labels.csv
+submission_format.csv
+
+# Quarantined EDA output: may contain per-sample values (see CLAUDE.md 0.3).
+reports/eda/raw/
+!reports/eda/raw/.gitkeep
+
+# Model weights - derived from the data, and large.
+models/
+!models/.gitkeep
+submission_src/assets/*
+!submission_src/assets/.gitkeep
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+
+# Generated PDFs of the docs. Regenerate with: python scripts/build_docs_pdf.py
+# (Markdown under docs/ is the source of truth; these are binary and would churn.)
+docs/pdf/
+
+# Training console logs. Their CONTENT is safe (metrics only, no uids - see CLAUDE.md 3.1),
+# which is why they live under reports/experiments/ where Claude may read them. They are
+# ignored only because they are large and churn on every run.
+reports/experiments/*.log
+
+# Build output
+submission/
+reports/figures/*
+!reports/figures/.gitkeep
+
+# ---------------------------------------------------------------------------
+# Standard Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.python-version
+
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Notebooks: strip outputs before committing. Outputs can embed patient images.
+.ipynb_checkpoints/
+
+# Environment / editor
+.env
+.env.local
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/settings.json
+
+# Claude Code local overrides (keep the shared settings.json in git)
+.claude/settings.local.json
