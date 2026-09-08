@@ -150,7 +150,7 @@ def main() -> int:
     oof_path = REPO_ROOT / args.models_dir / args.run / "oof.csv"
     features_path = REPO_ROOT / args.features
     for path, hint in (
-        (oof_path, f"python scripts/03_train.py --config conf/baseline.yaml"),
+        (oof_path, "python scripts/03_train.py --config conf/baseline.yaml"),
         (features_path, "python scripts/08_sbr_features.py --config conf/baseline.yaml"),
     ):
         if not path.exists():

@@ -114,12 +114,16 @@ def evaluate_run(run_dir: Path, reports_dir: Path) -> dict[str, object]:
             ]
 
     lines += [
-        "```bash",
-        "python scripts/05_package_submission.py \\",
-        "    --config conf/<the config these weights were trained with> \\",
-        f"    --temperature {shippable.temperature:.4f} \\",
-        f"    --fallback {base['positive_rate']:.4f} \\",
-        f"    --clip-eps {ship_clip:g}",
+        # One line, no continuations. This project is developed on Windows and the command is
+        # pasted into PowerShell, where `\` is not a line continuation - it is a path separator,
+        # and the shell fails with "Missing expression after unary operator '--'". A wrapped
+        # command that cannot be pasted is worse than a long one that can.
+        "```",
+        "python scripts/05_package_submission.py"
+        " --config conf/<the config these weights were trained with>"
+        f" --temperature {shippable.temperature:.4f}"
+        f" --fallback {base['positive_rate']:.4f}"
+        f" --clip-eps {ship_clip:g}",
         "```",
         "",
         "Copy the fold checkpoints into `submission_src/assets/` first.",
