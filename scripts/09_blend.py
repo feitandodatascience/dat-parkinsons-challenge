@@ -186,8 +186,20 @@ def main() -> int:
     # The comparison: a stack over the CNN alone, against a stack over both. Same estimator,
     # same folds, same scoring — the only difference is whether the tree model's column is
     # available. Any gain is therefore attributable to it and not to recalibration.
-    cnn_cal_loss = competition_logloss(y, cv_score(cnn_only, y, args.n_splits, args.seed))
-    honest_cal = competition_logloss(y, cv_score(both, y, args.n_splits, args.seed))
+    p_cnn_stacked = cv_score(cnn_only, y, args.n_splits, args.seed)
+    p_blend = cv_score(both, y, args.n_splits, args.seed)
+    cnn_cal_loss = competition_logloss(y, p_cnn_stacked)
+    honest_cal = competition_logloss(y, p_blend)
+
+    # Bank the held-out blended predictions as a run of their own, so the improvement can be put
+    # through the paired test in scripts/11_compare_runs.py rather than judged on the pooled
+    # numbers below. A difference this size needs a standard error attached to it, and only the
+    # per-scan pairing supplies one that is small enough to be informative.
+    blend_dir = REPO_ROOT / args.models_dir / f"{args.run}_blend"
+    blend_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        {"uid": df["uid"], "is_pathologic": y, "oof_pred": p_blend, "fold": fold_ids}
+    ).to_csv(blend_dir / "oof.csv", index=False)
 
     final_stack = fit_stack(both, y)
     in_sample = competition_logloss(y, stack_predict(final_stack, both))
@@ -257,6 +269,18 @@ def main() -> int:
             "complexity it would add to `main.py` is not free, and day 14 is close.",
             "",
         ]
+
+    lines += [
+        "## Verify it",
+        "",
+        "The held-out blended predictions are banked as a run of their own, so the improvement",
+        "can be given a standard error instead of being read off the pooled numbers above:",
+        "",
+        "```bash",
+        f"python scripts/11_compare_runs.py --run-a {args.run} --run-b {args.run}_blend",
+        "```",
+        "",
+    ]
 
     report_path = REPO_ROOT / "reports" / "experiments" / f"{args.run}_blend.md"
     report_path.parent.mkdir(parents=True, exist_ok=True)

@@ -36,6 +36,12 @@ VENDORED = [
     ("data/preprocess.py", "datpd_vendored/data/preprocess.py"),
     ("models/__init__.py", "datpd_vendored/models/__init__.py"),
     ("models/resnet3d.py", "datpd_vendored/models/resnet3d.py"),
+    # Shipped whether or not the blend is switched on. It is a few KB, imports nothing but
+    # numpy, and is inert unless main.py calls it — against which, having inference compute
+    # these features from a *different* copy of the code than the one the model was fitted on
+    # is precisely the kind of drift that shows up only as a leaderboard score that does not
+    # match CV.
+    ("features.py", "datpd_vendored/features.py"),
 ]
 
 # The vendored top-level `__init__.py` is generated rather than copied: the real

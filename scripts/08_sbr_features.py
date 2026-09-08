@@ -42,7 +42,6 @@ from __future__ import annotations
 import argparse
 import sys
 import time
-from itertools import permutations
 from pathlib import Path
 
 import numpy as np
@@ -55,135 +54,11 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 from datpd.config import load_config  # noqa: E402
 from datpd.data.io import load_volume  # noqa: E402
 from datpd.data.preprocess import preprocess  # noqa: E402
-
-# Half-width of the central box, in voxels, that should contain the striatum after COM
-# cropping. At 2.0 mm this is a 66 mm cube; the striatum spans roughly 60-70 mm (docs/01 4),
-# so this holds it with a little margin and excludes most of the rest of the brain.
-BOX_HALF = 16
-
-# Fractions of the box maximum used to define "supra-threshold" uptake. Two thresholds because
-# the shape of the bright region changes with where you cut it, and that change is itself
-# informative: a comma thins out gradually, a dot does not.
-THRESHOLDS = (0.5, 0.7)
-
-
-def _central_box(array: np.ndarray, half: int = BOX_HALF) -> np.ndarray:
-    centre = [s // 2 for s in array.shape]
-    return array[
-        tuple(
-            slice(max(0, c - half), min(s, c + half + 1))
-            for c, s in zip(centre, array.shape)
-        )
-    ]
-
-
-def _ratio(lo: float, hi: float) -> float:
-    """Signed relative difference, safe when both sides are ~0."""
-    total = lo + hi
-    return float((lo - hi) / total) if abs(total) > 1e-9 else 0.0
-
-
-def _inertia_shape(mask: np.ndarray) -> tuple[float, float, float]:
-    """Eigenvalue-derived shape of a binary region: elongation, flatness, and its size.
-
-    A healthy striatum images as a comma — elongated. Dopaminergic loss erodes the putaminal
-    tail first, so the region rounds toward a dot. Elongation is the direct numeric statement of
-    that, and it is the reason shape features belong here at all rather than only intensity.
-    """
-    coords = np.argwhere(mask)
-    if len(coords) < 8:
-        return 0.0, 0.0, 0.0
-    centred = coords - coords.mean(axis=0)
-    cov = (centred.T @ centred) / len(centred)
-    eigenvalues = np.sort(np.linalg.eigvalsh(cov))[::-1]
-    e0, e1, e2 = np.maximum(eigenvalues, 1e-9)
-    return float(np.sqrt(1.0 - e1 / e0)), float(np.sqrt(1.0 - e2 / e0)), float(len(coords))
-
-
-def extract_features(array: np.ndarray) -> dict[str, float]:
-    """All features for one preprocessed volume. Pure function of that volume alone.
-
-    Per-sample by construction: nothing here consults another scan, so a model built on these
-    features stays inside the competition's independence rule (CLAUDE.md 1.1).
-    """
-    features: dict[str, float] = {}
-    box = _central_box(array)
-
-    # --- Intensity, globally and in the striatal box -------------------------------------
-    for name, region in (("global", array), ("box", box)):
-        flat = region.ravel()
-        features[f"{name}_mean"] = float(flat.mean())
-        features[f"{name}_std"] = float(flat.std())
-        for q in (50, 75, 90, 99):
-            features[f"{name}_p{q}"] = float(np.percentile(flat, q))
-        features[f"{name}_max"] = float(flat.max())
-
-    # The classic SBR shape: target region against everything else. `preprocess` already
-    # divided by a reference region, so this is a second, geometry-based view of the same idea.
-    shell_mean = float((array.sum() - box.sum()) / max(array.size - box.size, 1))
-    features["box_to_shell"] = float(box.mean() / shell_mean) if abs(shell_mean) > 1e-9 else 0.0
-    features["box_to_global"] = (
-        float(box.mean() / array.mean()) if abs(float(array.mean())) > 1e-9 else 0.0
-    )
-    features["box_peak_to_shell"] = (
-        float(box.max() / shell_mean) if abs(shell_mean) > 1e-9 else 0.0
-    )
-
-    box_max = float(box.max())
-
-    # --- Supra-threshold extent and shape -------------------------------------------------
-    #
-    # CAUTION on interpreting these: computed over the WHOLE box, the inertia tensor is
-    # dominated by the separation between the two striata, not by the shape of either one. A
-    # pair of compact dots 14 voxels apart is *more* elongated by this measure than a pair of
-    # commas, which is the opposite of the clinical reading. The whole-box numbers are therefore
-    # a lobe-separation descriptor and are named accordingly; the per-hemisphere `elong{axis}_*`
-    # features below are the ones that measure comma-versus-dot. Both are kept — separation is
-    # plausibly informative too — but they must not be confused.
-    for threshold in THRESHOLDS:
-        mask = box >= threshold * box_max
-        tag = f"t{int(threshold * 100)}"
-        features[f"{tag}_frac"] = float(mask.mean())
-        separation, flatness, size = _inertia_shape(mask)
-        features[f"{tag}_separation"] = separation
-        features[f"{tag}_flatness"] = flatness
-        features[f"{tag}_size"] = size
-
-    # --- Laterality, computed for every axis ----------------------------------------------
-    # Only one of these is anatomical left-right; the two-lobe diagnostic in the report says
-    # which. The others are near-symmetric by construction and should carry little signal.
-    for axis in range(3):
-        lo, hi = np.split(box, [box.shape[axis] // 2], axis=axis)
-        features[f"asym{axis}_mean"] = _ratio(float(lo.mean()), float(hi.mean()))
-        features[f"asym{axis}_max"] = _ratio(float(lo.max()), float(hi.max()))
-        features[f"asym{axis}_p99"] = _ratio(
-            float(np.percentile(lo, 99)), float(np.percentile(hi, 99))
-        )
-        mask_lo = lo >= THRESHOLDS[0] * box_max
-        mask_hi = hi >= THRESHOLDS[0] * box_max
-        features[f"asym{axis}_supra"] = _ratio(float(mask_lo.sum()), float(mask_hi.sum()))
-        # Absolute asymmetry: which side is worse is arbitrary, how unequal they are is not.
-        features[f"asym{axis}_abs"] = abs(features[f"asym{axis}_mean"])
-
-        elong_lo, _, _ = _inertia_shape(mask_lo)
-        elong_hi, _, _ = _inertia_shape(mask_hi)
-        features[f"elong{axis}_lo"] = elong_lo
-        features[f"elong{axis}_hi"] = elong_hi
-        features[f"elong{axis}_min"] = min(elong_lo, elong_hi)
-
-    # --- Gradient within each half: the caudate-to-putamen direction ------------------------
-    # Putaminal uptake is lost before caudate uptake, so the gradient along the anterior-
-    # posterior axis, measured separately in each hemisphere, is one of the earliest signs.
-    for lateral, gradient in permutations(range(3), 2):
-        halves = np.split(box, [box.shape[lateral] // 2], axis=lateral)
-        ratios = []
-        for half in halves:
-            near, far = np.split(half, [half.shape[gradient] // 2], axis=gradient)
-            ratios.append(_ratio(float(near.mean()), float(far.mean())))
-        features[f"grad{lateral}{gradient}_mean"] = float(np.mean(ratios))
-        features[f"grad{lateral}{gradient}_diff"] = float(abs(ratios[0] - ratios[1]))
-
-    return features
+from datpd.features import (  # noqa: E402
+    THRESHOLDS,
+    central_box,
+    extract_features,
+)
 
 
 def two_lobe_score(array: np.ndarray, axis: int) -> int:
@@ -193,7 +68,7 @@ def two_lobe_score(array: np.ndarray, axis: int) -> int:
     one. Aggregated over the dataset this identifies the anatomical left-right axis without
     anyone having to look at a scan.
     """
-    box = _central_box(array)
+    box = central_box(array)
     mask = box >= THRESHOLDS[0] * float(box.max())
     profile = mask.sum(axis=tuple(a for a in range(3) if a != axis)).astype(float)
     if profile.max() <= 0:
