@@ -106,6 +106,23 @@ per-sample independent (CLAUDE.md §1.1). Average in **logit** space, consistent
 fold ensemble is already combined, then **refit the temperature** — TTA averaging softens
 predictions on its own, so the existing T=1.2614 will be wrong for it.
 
+**Can it be shipped inside the 3-hour inference budget?** Yes, comfortably. Measured on this
+machine (`ResNet3D(16,32,64,128)` at 96³, CPU):
+
+| | per scan |
+|---|---:|
+| one forward pass | 112 ms |
+| nine views, batched | 437 ms (**3.9×**, not 9× — the batch amortises) |
+| 5 fold models × 1 view | 0.56 s |
+| 5 fold models × 9 views | 2.19 s |
+
+Against the ~2.5 s/scan observed during the TTA smoke run, the model work is 0.44 s and
+**preprocessing is the other ~83%** — and TTA does not touch preprocessing. On the platform's
+A100 the forward passes are faster still while preprocessing stays CPU-bound, so nine views add
+a few percent to total runtime, not 9×. At ~2 s/scan the 3-hour budget covers roughly 5,000
+scans single-threaded, with 24 vCPUs available to parallelise preprocessing if it ever gets
+tight. Inference cost is not the reason to reject TTA; only the OOF result is.
+
 ### 3. SBR-style features + GBM blend — ~0.03 R
 
 The plan ranks this last. On CPU it should be near the top, because it is the only modelling

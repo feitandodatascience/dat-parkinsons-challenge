@@ -184,9 +184,15 @@ def main() -> int:
     cfg = load_config(REPO_ROOT / args.config)
     set_seed(cfg.seed)
     run_name = args.run or cfg.run_name
-    out_name = args.out_run or f"{run_name}_tta"
     views = VIEW_PRESETS[args.views]
     folds = tuple(args.folds) if args.folds is not None else cfg.train.folds
+
+    # A smoke run writes somewhere else entirely. Sharing a directory with the real run is a
+    # trap: per-fold predictions are banked as they finish, so a full run that dies partway
+    # leaves the folds it never reached holding 40-row smoke files, and the pooled OOF silently
+    # mixes the two. Separate directories make that impossible rather than merely unlikely.
+    default_out = f"{run_name}_tta_smoke" if args.limit else f"{run_name}_tta"
+    out_name = args.out_run or default_out
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     run_dir = REPO_ROOT / cfg.output_dir / run_name
@@ -284,6 +290,26 @@ def main() -> int:
     fold_files = sorted(out_dir.glob("oof_fold*.csv"))
     if not fold_files:
         raise SystemExit(f"No folds produced predictions in {out_dir}.")
+
+    # Every banked fold file must cover its whole validation fold. A short one means it was
+    # written by an earlier, smaller run - a smoke test, or an interrupted pass - and pooling it
+    # with full folds produces an OOF that is quietly built on the wrong rows. Checked rather
+    # than assumed, because the resulting number looks entirely reasonable.
+    stale = []
+    for path in fold_files:
+        fold = int(path.stem.replace("oof_fold", ""))
+        expected = int((df[fold_col] == fold).sum())
+        actual = len(pd.read_csv(path))
+        if actual < expected:
+            stale.append(f"    fold {fold}: {actual} rows, expected {expected}")
+    if stale and not args.limit:
+        raise SystemExit(
+            "Some banked fold predictions are incomplete:\n"
+            + "\n".join(stale)
+            + f"\n\nThese are left over from a smaller run. Delete "
+            f"{out_dir.relative_to(REPO_ROOT)}/oof_fold*.csv and rerun, or pass --folds to "
+            "redo just the short ones."
+        )
 
     oof = pd.concat([pd.read_csv(p) for p in fold_files], ignore_index=True)
     duplicated = int(oof["uid"].duplicated().sum())
