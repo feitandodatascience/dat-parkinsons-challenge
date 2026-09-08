@@ -52,11 +52,22 @@ def lateral_balance(array: np.ndarray) -> float:
 
 
 class TestMakeView:
-    def test_identity_is_a_no_op(self) -> None:
+    def test_identity_is_exactly_a_no_op(self) -> None:
+        """Bit-for-bit, not merely close.
+
+        This is the path `submission_src/main.py` takes when TTA is switched off, so it must
+        reproduce the un-augmented predictions exactly — otherwise "TTA disabled" would still
+        perturb the shipped model, and a packaged submission would not match its own CV.
+        """
         array = asymmetric_volume()
         out = tta.make_view(array, *IDENTITY)
         assert out.shape == array.shape
-        np.testing.assert_allclose(out, array, atol=1e-5)
+        assert np.array_equal(out, array)
+
+    def test_identity_short_circuit_covers_every_no_op_spelling(self) -> None:
+        for axes in ((0, 1), (0, 2), (1, 2)):
+            array = asymmetric_volume()
+            assert np.array_equal(tta.make_view(array, 0.0, axes, (0, 0, 0), 1.0), array)
 
     def test_shape_is_always_preserved(self) -> None:
         array = asymmetric_volume((24, 28, 32))
@@ -199,6 +210,47 @@ class TestSmokeSampling:
         fold = self._ordered_fold(n=30)
         drawn = fold.sample(n=min(40, len(fold)), random_state=42)
         assert len(drawn) == 30
+
+
+class TestShippedImplementationMatches:
+    """`submission_src/main.py` must transform volumes identically to the experiment script.
+
+    The OOF number that justifies shipping TTA is measured by scripts/07_tta.py. If main.py's
+    copy of the view maths drifts from it by even a little, the shipped model is not the one
+    that was validated — and nothing would fail loudly, the leaderboard score would just be
+    worse than CV for no visible reason.
+    """
+
+    @staticmethod
+    def _main_module():
+        spec = importlib.util.spec_from_file_location(
+            "submission_main", REPO_ROOT / "submission_src" / "main.py"
+        )
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["submission_main"] = module
+        spec.loader.exec_module(module)
+        return module
+
+    def test_view_maths_is_identical(self) -> None:
+        main = self._main_module()
+        array = asymmetric_volume()
+        for view in tta.VIEW_PRESETS["default"]:
+            np.testing.assert_array_equal(
+                main._make_view(array, *view),
+                tta.make_view(array, *view),
+                err_msg=f"main.py and 07_tta.py disagree on view {view}",
+            )
+
+    def test_tta_is_off_by_default(self) -> None:
+        """A packaged submission must not gain TTA unless it was asked for."""
+        main = self._main_module()
+        assert main.TTA_VIEWS == (IDENTITY,)
+
+    def test_default_view_leaves_the_volume_untouched(self) -> None:
+        main = self._main_module()
+        array = asymmetric_volume()
+        assert np.array_equal(main._make_view(array, *main.TTA_VIEWS[0]), array)
 
 
 class TestPredictViews:

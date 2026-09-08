@@ -109,6 +109,27 @@ class TestConstantBaking:
         with pytest.raises(SystemExit):
             packager.build({"NO_SUCH_CONSTANT": 1.0}, prior_only=True)
 
+    def test_tta_views_bake_into_valid_python(self, packager) -> None:
+        """A nested tuple is baked by `repr`; it has to survive the round trip."""
+        views = (
+            (0.0, (1, 2), (0, 0, 0), 1.0),
+            (4.0, (1, 2), (0, 0, 0), 1.0),
+            (0.0, (1, 2), (0, 2, 0), 0.96),
+        )
+        packager.build({"TTA_VIEWS": views}, prior_only=True)
+        text = (packager.BUILD_DIR / "main.py").read_text(encoding="utf-8")
+
+        namespace: dict[str, object] = {}
+        line = next(ln for ln in text.splitlines() if ln.startswith("TTA_VIEWS = "))
+        exec(line, namespace)  # noqa: S102 - reading back what we just wrote is the point
+        assert namespace["TTA_VIEWS"] == views
+
+    def test_shipped_default_leaves_tta_off(self, packager) -> None:
+        """An ordinary build must not acquire TTA. It ships only when explicitly baked."""
+        packager.build({"TEMPERATURE": 1.0}, prior_only=True)
+        text = (packager.BUILD_DIR / "main.py").read_text(encoding="utf-8")
+        assert "TTA_VIEWS = ((0.0, (1, 2), (0, 0, 0), 1.0),)" in text
+
 
 class TestRuntimeCompatibility:
     def test_vendored_tree_imports_with_no_access_to_the_training_package(

@@ -267,6 +267,13 @@ def build(baked: dict[str, object], prior_only: bool = False) -> int:
     if prior_only:
         print("\nPRIOR-ONLY BUILD: this predicts a constant for every row. Its purpose is to")
         print("prove the platform contract end to end before a model exists, not to score.")
+    views = baked.get("TTA_VIEWS")
+    if isinstance(views, tuple) and len(views) > 1:
+        print(f"\nTTA IS ON ({len(views)} views).")
+        print("Confirm --temperature came from `04_evaluate.py --run <run>_tta`, not from the")
+        print("un-augmented run. Averaging views softens the logits on its own, so the old")
+        print("temperature softens them twice and gives back most of what TTA gained.")
+
     print("Next: test it in the runtime repo with `just pack-submission && just test-submission`")
     return 0
 
@@ -282,6 +289,10 @@ def main() -> int:
                         help="training positive rate, used when a scan fails to load")
     parser.add_argument("--clip-eps", type=float, default=None,
                         help="prediction clip chosen on OOF by scripts/04_evaluate.py")
+    parser.add_argument("--tta", action="store_true",
+                        help="bake the nine-view test-time augmentation set into main.py. "
+                             "Only after scripts/07_tta.py shows it helps on OOF, and only "
+                             "with a temperature refitted on the TTA predictions.")
     parser.add_argument("--prior-only", action="store_true",
                         help="package a valid submission with no weights, predicting --fallback "
                              "for every row. Use on day 1 to validate the platform loop.")
@@ -294,6 +305,19 @@ def main() -> int:
         baked["FALLBACK_PROB"] = args.fallback
     if args.clip_eps is not None:
         baked["CLIP_EPS"] = args.clip_eps
+    if args.tta:
+        # Imported from the experiment script so the shipped views are literally the ones the
+        # OOF number was measured with. Duplicating the tuple here would let the two drift.
+        sys.path.insert(0, str(REPO_ROOT / "scripts"))
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "_tta", REPO_ROOT / "scripts" / "07_tta.py"
+        )
+        assert spec is not None and spec.loader is not None
+        tta_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(tta_module)
+        baked["TTA_VIEWS"] = tta_module.VIEW_PRESETS["default"]
 
     if args.config:
         # Bake the preprocessing and architecture the weights were actually trained with.

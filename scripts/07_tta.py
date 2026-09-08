@@ -118,6 +118,13 @@ def make_view(
     if array.ndim != 3:
         raise ValueError(f"expected a 3D volume, got shape {array.shape}")
 
+    # Short-circuit the identity. Resampling a volume onto its own grid is a no-op in exact
+    # arithmetic but not in floating point, and this path has to be *exactly* a no-op: it is
+    # what `submission_src/main.py` runs when TTA is disabled, so turning TTA off must
+    # reproduce the un-augmented predictions bit for bit rather than approximately.
+    if rotate_deg == 0.0 and scale == 1.0 and tuple(shift_vox) == (0, 0, 0):
+        return array.astype(np.float32, copy=False)
+
     matrix = np.eye(3, dtype=np.float64) / float(scale)
 
     if rotate_deg:

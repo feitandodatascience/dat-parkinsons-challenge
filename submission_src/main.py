@@ -72,6 +72,22 @@ CROP = "center"
 MODEL_WIDTHS = (16, 32, 64, 128)
 MODEL_DROPOUT = 0.3
 
+# Test-time augmentation views, as (rotation degrees, plane, shift in voxels, scale).
+#
+# DEFAULT IS OFF: a single identity view, which `_make_view` short-circuits to an untouched
+# array, so predictions are bit-for-bit what they would be with no TTA code present at all.
+# `scripts/05_package_submission.py --tta` bakes the nine-view set in its place, and only after
+# TTA has been shown to help on OOF (scripts/07_tta.py).
+#
+# Every view is small and laterality-preserving. There is deliberately no left-right flip: DaT
+# abnormality is frequently asymmetric and the more-affected side carries clinical meaning, so
+# averaging a scan with its mirror would destroy the signal being measured.
+#
+# Rules note (CLAUDE.md 1.1): each view is derived from this scan alone and the results are
+# averaged for this scan alone. Nothing is pooled across the test set, so per-sample
+# independence holds.
+TTA_VIEWS = ((0.0, (1, 2), (0, 0, 0), 1.0),)
+
 
 def load_models() -> list[torch.nn.Module]:
     """Load every fold checkpoint shipped in `assets/`.
@@ -100,6 +116,47 @@ def load_models() -> list[torch.nn.Module]:
     return models
 
 
+def _make_view(
+    array: np.ndarray,
+    rotate_deg: float,
+    axes: tuple[int, int],
+    shift_vox: tuple[int, int, int],
+    scale: float,
+) -> np.ndarray:
+    """One deterministic geometric perturbation, shape-preserving.
+
+    Must stay numerically identical to `make_view` in scripts/07_tta.py — that is the function
+    the OOF measurement was made with, and a divergence here would mean the shipped model is
+    not the one that was validated.
+    """
+    if rotate_deg == 0.0 and scale == 1.0 and tuple(shift_vox) == (0, 0, 0):
+        return array.astype(np.float32, copy=False)
+
+    from scipy import ndimage
+
+    matrix = np.eye(3, dtype=np.float64) / float(scale)
+    if rotate_deg:
+        theta = np.deg2rad(rotate_deg)
+        i, j = axes
+        rotation = np.eye(3, dtype=np.float64)
+        rotation[i, i] = np.cos(theta)
+        rotation[i, j] = -np.sin(theta)
+        rotation[j, i] = np.sin(theta)
+        rotation[j, j] = np.cos(theta)
+        matrix = matrix @ rotation
+
+    centre = (np.asarray(array.shape, dtype=np.float64) - 1.0) / 2.0
+    offset = centre - matrix @ centre - np.asarray(shift_vox, dtype=np.float64)
+    return ndimage.affine_transform(
+        array.astype(np.float32, copy=False),
+        matrix,
+        offset=offset,
+        order=1,
+        mode="nearest",
+        output_shape=array.shape,
+    ).astype(np.float32)
+
+
 def predict_one(models: list[torch.nn.Module], uid: str) -> float:
     """Predict a calibrated probability for a single examination.
 
@@ -113,10 +170,15 @@ def predict_one(models: list[torch.nn.Module], uid: str) -> float:
     array = preprocess(volume, TARGET_SPACING, TARGET_SHAPE, NORMALIZATION, CROP)
 
     device = next(models[0].parameters()).device
-    tensor = torch.from_numpy(array).float()[None, None].to(device)
+    # One batch holding every view of this one scan. Batching rather than looping matters:
+    # measured on CPU, nine views cost 3.9x a single view, not 9x.
+    batch = np.stack([_make_view(array, *view) for view in TTA_VIEWS])
+    tensor = torch.from_numpy(batch).float()[:, None].to(device)
 
     with torch.no_grad():
-        logits = [model(tensor).item() for model in models]
+        # Mean logit across views, then across folds — both in logit space, so a single
+        # saturated view or fold cannot drag the ensemble the way probability averaging would.
+        logits = [float(model(tensor).float().mean().item()) for model in models]
 
     # Average in logit space, then temperature-scale, then squash. Averaging logits rather
     # than probabilities keeps the ensemble from being dragged by a single saturated member.
