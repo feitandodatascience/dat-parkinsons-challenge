@@ -200,7 +200,17 @@ def main() -> int:
     print(f"Device: {device} | views: {args.views} ({len(views)}) | fold column: {fold_col}")
     print(f"Reading checkpoints from {run_dir.relative_to(REPO_ROOT)}")
     if args.limit:
-        print(f"SMOKE RUN: {args.limit} scans per fold. Do not log this as a result.")
+        print(f"SMOKE RUN: {args.limit} scans per fold, sampled. Not a result.")
+
+    # The original run's predictions, for a like-for-like comparison on the SAME rows. Without
+    # this, a fold's TTA score can only be read against the other folds — and at smoke-run
+    # sample sizes that comparison is dominated by which scans happened to be drawn, not by
+    # anything TTA did. Paired against the same fold's own baseline, the sampling noise mostly
+    # cancels, because both numbers are computed over the identical rows.
+    baseline_oof = run_dir / "oof.csv"
+    before = pd.read_csv(baseline_oof) if baseline_oof.exists() else None
+    if before is None:
+        print(f"NOTE: no {baseline_oof.name} to compare against; showing TTA scores alone.")
 
     for fold in folds:
         ckpt_path = run_dir / f"fold{fold}.pt"
@@ -214,7 +224,13 @@ def main() -> int:
 
         val_df = df[df[fold_col] == fold]
         if args.limit:
-            val_df = val_df.head(args.limit)
+            # Sampled, not `.head()`. folds.csv inherits the label file's row order, so the
+            # first N rows of a fold are a systematic slice of it — if that order carries any
+            # structure at all, the smoke run's per-fold scores differ for reasons that have
+            # nothing to do with the model, and the folds stop being comparable to each other.
+            val_df = val_df.sample(
+                n=min(args.limit, len(val_df)), random_state=cfg.seed + fold
+            )
 
         start = time.time()
         logits, failures = [], 0
@@ -252,6 +268,19 @@ def main() -> int:
             flush=True,
         )
 
+        if before is not None:
+            paired = before.merge(fold_frame[["uid"]], on="uid")
+            if len(paired) == len(fold_frame):
+                was = summarize(
+                    paired["is_pathologic"].to_numpy(), paired["oof_pred"].to_numpy()
+                )
+                print(
+                    f"          without TTA on the same rows: "
+                    f"logloss {was['logloss']:.4f} ({metrics['logloss'] - was['logloss']:+.4f})"
+                    f"  auroc {was['auroc']:.4f} ({metrics['auroc'] - was['auroc']:+.4f})",
+                    flush=True,
+                )
+
     fold_files = sorted(out_dir.glob("oof_fold*.csv"))
     if not fold_files:
         raise SystemExit(f"No folds produced predictions in {out_dir}.")
@@ -272,9 +301,7 @@ def main() -> int:
     print(f"  auroc            {tta['auroc']:.4f}")
     print(f"  ece              {tta['ece']:.4f}")
 
-    baseline_oof = run_dir / "oof.csv"
-    if baseline_oof.exists() and not args.limit:
-        before = pd.read_csv(baseline_oof)
+    if before is not None:
         shared = before.merge(oof[["uid"]], on="uid")
         base = summarize(shared["is_pathologic"].to_numpy(), shared["oof_pred"].to_numpy())
         print(f"\n  without TTA      {base['logloss']:.4f}  auroc {base['auroc']:.4f}")
@@ -282,6 +309,9 @@ def main() -> int:
               f"{tta['auroc'] - base['auroc']:+.4f} auroc")
         print("\n  Both numbers are UNCALIBRATED. TTA softens logits, so its temperature")
         print("  differs from the original run's - compare after calibration, not here.")
+        if args.limit:
+            print("\n  Pooled over a SAMPLE. The paired per-fold deltas above are the thing")
+            print("  to read on a smoke run; this total is still too small to act on.")
 
     print(f"\nNext: python scripts/04_evaluate.py --run {out_name}")
     return 0

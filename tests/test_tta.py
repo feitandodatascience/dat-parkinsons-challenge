@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 import torch
 
@@ -153,6 +154,51 @@ class TestPresets:
             )
             for deg, axes in rotations:
                 assert (-deg, axes) in rotations, f"{preset} lacks the mirror of {deg} in {axes}"
+
+
+class TestSmokeSampling:
+    """`--limit` must draw a representative sample, not the first N rows.
+
+    The first version took `.head(N)`. folds.csv inherits the label file's row order, so if that
+    order carries any structure, each fold's first N rows are a systematic slice — and the smoke
+    run's per-fold scores then differ for reasons unrelated to the model. That is exactly what
+    a smoke run must not do, because it invites a real decision from a fake signal.
+    """
+
+    @staticmethod
+    def _ordered_fold(n: int = 200) -> pd.DataFrame:
+        """A fold whose row order is perfectly confounded with the label."""
+        return pd.DataFrame(
+            {
+                "uid": [f"u{i:04d}" for i in range(n)],
+                "is_pathologic": (np.arange(n) >= n // 2).astype(int),
+            }
+        )
+
+    def test_head_would_have_been_unrepresentative(self) -> None:
+        """Guards the guard: the fixture must actually expose the flaw being fixed."""
+        fold = self._ordered_fold()
+        assert fold.head(40)["is_pathologic"].mean() == 0.0
+        assert fold["is_pathologic"].mean() == pytest.approx(0.5)
+
+    def test_sampling_recovers_the_base_rate(self) -> None:
+        fold = self._ordered_fold()
+        drawn = fold.sample(n=40, random_state=42)
+        assert 0.25 < drawn["is_pathologic"].mean() < 0.75
+
+    def test_sampling_is_reproducible_and_differs_per_fold(self) -> None:
+        """Same seed and fold reproduces; different folds must not draw identical positions."""
+        fold = self._ordered_fold()
+        first = fold.sample(n=40, random_state=42 + 0)
+        again = fold.sample(n=40, random_state=42 + 0)
+        other = fold.sample(n=40, random_state=42 + 1)
+        assert list(first["uid"]) == list(again["uid"])
+        assert list(first["uid"]) != list(other["uid"])
+
+    def test_limit_larger_than_the_fold_is_safe(self) -> None:
+        fold = self._ordered_fold(n=30)
+        drawn = fold.sample(n=min(40, len(fold)), random_state=42)
+        assert len(drawn) == 30
 
 
 class TestPredictViews:
