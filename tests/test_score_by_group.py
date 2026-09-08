@@ -152,6 +152,26 @@ class TestBuildReport:
         for family in ("fam0", "fam1", "fam2"):
             assert family in text
 
+    def test_every_markdown_table_is_well_formed(self) -> None:
+        """Ragged tables render silently and wrongly; one slipped into a sibling script."""
+        df = make_oof()
+        lines = score_by_group.build_report(df, "synthetic", min_group_n=30)
+
+        blocks, current = [], []
+        for line in lines:
+            if line.startswith("|"):
+                current.append(line)
+            elif current:
+                blocks.append(current)
+                current = []
+        if current:
+            blocks.append(current)
+
+        assert blocks
+        for block in blocks:
+            widths = {line.count("|") for line in block}
+            assert len(widths) == 1, f"ragged table: column counts {widths} in {block[0]!r}"
+
     def test_transfer_penalty_is_reported(self) -> None:
         df = make_oof()
         text = "\n".join(score_by_group.build_report(df, "synthetic", min_group_n=30))
