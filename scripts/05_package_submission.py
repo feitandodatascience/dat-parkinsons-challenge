@@ -301,9 +301,15 @@ def build(
     views = baked.get("TTA_VIEWS")
     if isinstance(views, tuple) and len(views) > 1:
         print(f"\nTTA IS ON ({len(views)} views).")
-        print("Confirm --temperature came from `04_evaluate.py --run <run>_tta`, not from the")
-        print("un-augmented run. Averaging views softens the logits on its own, so the old")
-        print("temperature softens them twice and gives back most of what TTA gained.")
+        # Only worth saying when a temperature is actually in play. On the blend path the stack
+        # replaces it, so telling the user to go and check where their temperature came from
+        # sends them after a constant this build never reads.
+        if not baked.get("USE_BLEND"):
+            print("Confirm --temperature came from `04_evaluate.py --run <run>_tta`, not from")
+            print("the un-augmented run. Averaging views softens the logits on its own, so the")
+            print("old temperature softens them twice and gives back most of what TTA gained.")
+        else:
+            print("Calibration comes from the stack, not TEMPERATURE - see the note above.")
 
     print("Next: test it in the runtime repo with `just pack-submission && just test-submission`")
     return 0

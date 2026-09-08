@@ -20,6 +20,7 @@ Rules for this file:
 | 2 | 2026-09-08 | — | | **per-family error decomposition** (`06_score_by_group.py`), no training | — | — | — | — | — | n/a | measurement, not a model. Leave-one-family-out temperature transfer penalty **+0.0006**; per-centre oracle prior correction worth at most **0.004**. Closes row 0b |
 | 3 | 2026-09-08 | `baseline.yaml` | | **TTA**, 9 laterality-preserving views on the run-1 checkpoints | **0.3164** | — | 0.9306 | 0.0269 | not submitted | marginal | gain **−0.0022**, temperature falls to 1.2457. AUROC +0.0004, so the gain is variance reduction, not ranking. Same order as the CV↔LB gap |
 | 4 | 2026-09-08 | `baseline.yaml` | | **SBR features + gradient boosting, stacked onto the CNN** | **0.3048** | — | — | — | not submitted | **yes** | gain **−0.0175**, cross-validated. Trees alone 0.3919 / AUROC 0.9046; logit correlation 0.797. Largest measured gain in the project |
+| 5 | 2026-09-09 | `baseline.yaml` | | **TTA + SBR blend, packaged** (lightgbm, 5 boosters, logistic stack) | **0.3061** | — | 0.9375 | — | _submitted_ | **yes** | paired vs baseline: **−0.01562, 3.1σ**, CI [−0.0255, −0.0057], 63.4% of scans improved. Stack: intercept 0.0236, CNN 0.6164, trees 0.3779. No temperature — the stack carries it |
 
 **Run 1 packaged 2026-09-08**: `submission.zip`, 37.9 MB, 5 fold checkpoints ensembled in logit
 space. All pre-flight checks passed, including the new one that loads every shipped checkpoint
@@ -259,6 +260,38 @@ blend: refit the tree model on `lightgbm` rather than scikit-learn, whose pickle
 fragile against whatever version the runtime has, and vendor it with the stack coefficients.
 `src/datpd/features.py` is already the single definition of the 61 features and is already
 vendored, so inference cannot drift from what the model was fitted on.
+
+### The blend and TTA together, packaged 2026-09-09
+
+`submission.zip`, 38.3 MB: 5 CNN fold checkpoints, 5 lightgbm boosters, `stack.json`, and
+`datpd_vendored/features.py`. Baked constants verified against the source of truth after the
+build — `USE_BLEND` true, 9 TTA views, 61 features in an order matching the vendored code,
+`source_run: baseline_tta`.
+
+**The gains are not additive.** TTA alone was −0.00215 and the blend alone −0.01458, which would
+sum to −0.0167; together they measure **−0.01562**. Both partly work through variance reduction,
+so they overlap. Worth remembering before assuming two independent-looking improvements will
+stack.
+
+**lightgbm rather than scikit-learn**, decided before measuring rather than after. A
+scikit-learn estimator ships as a pickle whose compatibility with the runtime's version is not
+guaranteed; lightgbm's booster is text and loads across versions. Measuring with one model and
+shipping another would have meant the number that justified the change was never the number
+submitted. Re-measured on lightgbm the gain held (−0.01562 against sklearn's −0.01458).
+
+**The stack replaces temperature scaling, it does not compose with it.** `STACK_COEF_CNN` is
+0.6164 — fitted on logits that were never temperature-scaled, so it already carries the
+calibration, equivalent to a temperature of about 1.62. Applying `TEMPERATURE` as well would
+soften twice and hand back most of the gain. The packager refuses `--temperature` alongside
+`--blend-from`, and a test asserts the blend code path never references it.
+
+**Two silent failure modes are guarded**, both of which raise nothing and produce plausible
+wrong probabilities: a feature vector assembled in a different column order than the trees were
+fitted on (`stack.json` records the fit-time order, the loader asserts against it), and a blend
+switched on without its assets staged.
+
+Expect **~0.305** on the leaderboard, from 0.3210 less the 0.0156, read against the +0.0024
+CV↔LB gap established by run 1.
 
 ### Decisions made
 
