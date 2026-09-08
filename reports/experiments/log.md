@@ -20,7 +20,7 @@ Rules for this file:
 | 2 | 2026-09-08 | — | | **per-family error decomposition** (`06_score_by_group.py`), no training | — | — | — | — | — | n/a | measurement, not a model. Leave-one-family-out temperature transfer penalty **+0.0006**; per-centre oracle prior correction worth at most **0.004**. Closes row 0b |
 | 3 | 2026-09-08 | `baseline.yaml` | | **TTA**, 9 laterality-preserving views on the run-1 checkpoints | **0.3164** | — | 0.9306 | 0.0269 | not submitted | marginal | gain **−0.0022**, temperature falls to 1.2457. AUROC +0.0004, so the gain is variance reduction, not ranking. Same order as the CV↔LB gap |
 | 4 | 2026-09-08 | `baseline.yaml` | | **SBR features + gradient boosting, stacked onto the CNN** | **0.3048** | — | — | — | not submitted | **yes** | gain **−0.0175**, cross-validated. Trees alone 0.3919 / AUROC 0.9046; logit correlation 0.797. Largest measured gain in the project |
-| 5 | 2026-09-09 | `baseline.yaml` | | **TTA + SBR blend, packaged** (lightgbm, 5 boosters, logistic stack) | **0.3061** | — | 0.9375 | — | _pending_ | **yes** | paired vs baseline: **−0.01562, 3.1σ**, CI [−0.0255, −0.0057], 63.4% of scans improved. Stack: intercept 0.0236, CNN 0.6164, trees 0.3779. No temperature — the stack carries it |
+| 5 | 2026-09-09 | `baseline.yaml` | | **TTA + SBR blend, packaged** (lightgbm, 5 boosters, logistic stack) | **0.3061** | — | 0.9375 | — | **0.2973** | **yes — shipped** | paired vs baseline: **−0.01562, 3.1σ**, CI [−0.0255, −0.0057], 63.4% of scans improved. Stack: intercept 0.0236, CNN 0.6164, trees 0.3779. No temperature — the stack carries it. **LB AUROC 0.9396, rank #98/897, 15 min of a 3 h budget, zero filtered log lines.** Full log: `reports/submissions/002_2026-09-09_tta_blend.md` |
 
 **Run 1 packaged 2026-09-08**: `submission.zip`, 37.9 MB, 5 fold checkpoints ensembled in logit
 space. All pre-flight checks passed, including the new one that loads every shipped checkpoint
@@ -292,6 +292,52 @@ switched on without its assets staged.
 
 Expect **~0.305** on the leaderboard, from 0.3210 less the 0.0156, read against the +0.0024
 CV↔LB gap established by run 1.
+
+### It came back at 0.2973 — better than predicted, and the reason is not the method (2026-09-09)
+
+**LB 0.2973, AUROC 0.9396, rank #98/897.** Prediction was ~0.305. Runtime 15 min of 180, no
+fallbacks, and — the other thing this submission was testing — **zero filtered log lines and no
+compliance warning**, so the §3.1 logging rewrite is validated on the platform. Full log in
+`reports/submissions/002_2026-09-09_tta_blend.md`.
+
+The temptation is to conclude the blend is worth more than measured. It is not, and the evidence
+against that is in the same result.
+
+| | OOF | LB | gap |
+|---|---:|---:|---:|
+| Run 1 | 0.3186 | 0.3210 | **+0.0024** |
+| Submission 2 | 0.3061 | 0.2973 | **−0.0088** |
+
+The realised gain is 0.3210 − 0.2973 = **−0.0237**, against a measured −0.01562 with CI
+[−0.0255, −0.0057]. So the leaderboard gain sits near the *top* of the CI while the OOF estimate
+sat in the middle — an over-performance of about −0.008.
+
+**AUROC settles where that came from.** OOF AUROC 0.9375 → LB AUROC 0.9396. If the surplus were
+the blend calibrating better on the test set than on OOF, log loss would improve and AUROC would
+not move; log loss is calibration-sensitive and AUROC is calibration-invariant. **Both improved.**
+That is a test set that is a marginally easier draw for this model, not a method that transfers
+better than it measured.
+
+**Two consequences, and the second is the important one.**
+
+First: keep valuing TTA + blend at the −0.0156 that was measured. Do not re-plan around −0.0237.
+
+Second, and this revises a claim this file has been leaning on hard: **the CV↔LB gap is not
+±0.0024.** It is now two observations, +0.0024 and −0.0088, on opposite sides of zero. A single
+point measured nothing about the spread — it could not, having no second point to differ from.
+The honest bound is roughly **±0.01**.
+
+That is still small enough for the purpose it was put to: Phase 3 decisions were made on gains of
+−0.0156 and −0.0175, comfortably clear of ±0.01, and they held up. But it is four times looser
+than the figure quoted in "CV is trustworthy, and that changes the plan", and it changes the
+threshold going forward. **Any future decision resting on an OOF margin under ~0.01 is unresolved,
+not won** — including a 128³ run, which needs to clear that bar on OOF before it is worth
+repackaging for. TTA alone, at −0.0022, was always inside this band; it shipped as a rider on the
+blend rather than on its own evidence, which was the right call for a different reason (near-zero
+marginal cost) than the one recorded at the time.
+
+The general form of the mistake avoided here: **a gain larger than predicted is not confirmation,
+it is an unexplained residual.** It gets the same scrutiny as a shortfall would.
 
 ### Decisions made
 

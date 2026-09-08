@@ -47,7 +47,7 @@ Mon 14 Sep lock-down. If R ≈ 48 h, that is **~2.5 R total**. Spend it delibera
 | 5 | Label smoothing 0.05 | 1.0 R | ~0 | low | **skip** |
 | 6 | `flip_lr` ablation | 1.0 R | likely +ve (worse) | low | **skip** |
 | 7 | Grouped CV | 0.36–1.0 R | answers a question the LB already answered | low | **deprioritised** |
-| 8 | 128³ @ 1.5 mm | **2.4 R** | −0.02 to −0.05 | unreachable | **rule out** |
+| 8 | 128³ @ 1.5 mm | **2.4 R** on CPU, ~4 h on an A100 | −0.02 to −0.05 | high, *if* a GPU is rented | **reopened** — see docs/07 |
 | 9 | Pretrained 3D backbone (DenseNet121) | >2 R | unknown | unreachable | **rule out** |
 | 10 | 2.5D timm model | >2 R | unknown | unreachable | **rule out** |
 
@@ -211,6 +211,19 @@ stays an open question in the log — that is the correct place for it.
 likely the single largest available win and it cannot be had on this hardware. If GPU access
 appears before Sat 12 Sep, **this is the one thing to spend it on** — ahead of everything else in
 this file, including item 4.
+
+> **Reopened 2026-09-09.** The organizers have answered the cloud-compute question: renting GPU
+> compute is permitted, subject to three conditions (no third-party retention, private to the
+> competitor, every copy deletable). [07_cloud_compute_compliance.md](07_cloud_compute_compliance.md)
+> records the ruling, the providers it eliminates, and the operational shape that satisfies it.
+> `conf/highres.yaml` is the config; `train.py` needs no change.
+>
+> Two corrections to the framing above, both from docs/07. **Compute stops being the constraint**
+> — 2.4 R is ~4 hours on an A100, not five days. And **the refit chain becomes the constraint**:
+> the shipped temperature and stack coefficients are properties of the 96³ geometry and are void
+> at 128³, so accepting this item means re-running all of Phase 3 and repackaging before Sun 13.
+> Judge it on OOF against the current build's 0.3061 — the +0.0024 CV↔LB gap means no submission
+> slot need be spent to decide, which matters because spending the 09-12 slot forecloses 09-14.
 
 The pretrained-backbone route carries a second problem beyond compute: most public DaT
 checkpoints are PPMI-derived, and PPMI makes a solution prize-ineligible

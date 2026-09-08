@@ -1,0 +1,58 @@
+# High-resolution variant of baseline.yaml: 128^3 @ 1.5 mm.
+#
+# docs/05 ranks this the single largest available win (-0.02 to -0.05 expected) and rules it
+# unreachable at 2.4 R on CPU. It is reachable on a rented GPU; docs/07 records the compliance
+# ruling that permits one and the conditions attached to it.
+#
+# ONLY the geometry and the dataloader worker count differ from baseline.yaml. Batch size stays
+# at 8 even though an A100 would take far more, because raising it changes the effective
+# learning rate and would confound the resolution change with an optimisation change. The
+# comparison against run 1 is the whole point of this config; keep it clean.
+
+run_name: highres
+seed: 42
+output_dir: models
+
+data:
+  root: data/raw
+  labels_csv: data/raw/train_labels.csv
+  nifti_dir: data/raw/niftis
+  folds_csv: data/interim/folds.csv
+  # 2.37x the voxels of baseline. The preprocessing cache is keyed on these settings, so this
+  # run builds its own cache and does not disturb the 96^3 one.
+  target_spacing_mm: [1.5, 1.5, 1.5]
+  target_shape: [128, 128, 128]
+  normalization: reference_region
+  crop: com
+  cache_dir: data/processed/cache
+
+model:
+  name: resnet3d
+  widths: [16, 32, 64, 128]
+  dropout: 0.3
+  in_channels: 1
+
+train:
+  epochs: 30
+  batch_size: 8
+  lr: 0.0003
+  weight_decay: 0.0001
+  scheduler: cosine
+  warmup_epochs: 2
+  amp: true
+  grad_clip: 1.0
+  early_stopping_patience: 8
+  # Raised from 4: on a 24-vCPU cloud box the first epoch is cache-build bound, and
+  # preprocessing at 1.5 mm resamples 2.37x the voxels of the baseline.
+  num_workers: 12
+  fold_column: fold_strat
+  folds: [0, 1, 2, 3, 4]
+
+aug:
+  flip_lr: false
+  rotate_degrees: 10.0
+  translate_mm: 5.0
+  scale_range: [0.9, 1.1]
+  intensity_jitter: 0.1
+  noise_std: 0.01
+  mixup_alpha: 0.0
