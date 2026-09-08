@@ -82,6 +82,48 @@ def check_imports(files: list[Path]) -> list[str]:
     return problems
 
 
+# Collections whose size is a property of OUR submission rather than of the test data, and so
+# is safe to log. Keep this list short and justify every addition.
+SAFE_TO_COUNT = {"models", "checkpoints"}
+
+
+def check_logging(main_py: Path) -> list[str]:
+    """Flag log statements that would disclose facts about the hidden test set.
+
+    On 2026-09-08 the platform filtered three lines from a submission's log and attached a
+    disqualification warning. All three contained `len(submission)`; a line reporting the number
+    of fold models was untouched. The forbidden content is **information about the test data** —
+    above all its row count, whether as a total, a progress denominator, or a row index.
+
+    This is a heuristic scan of logger calls, not a proof. It catches the shapes that have
+    actually gone wrong; it cannot catch a count passed through an intermediate variable.
+    """
+    text = main_py.read_text(encoding="utf-8")
+    problems = []
+
+    # Logger calls, including multi-line ones.
+    for match in re.finditer(r"logger\.\w+\(((?:[^()]|\([^()]*\))*)\)", text, flags=re.DOTALL):
+        call = match.group(1)
+        line_no = text[: match.start()].count("\n") + 1
+
+        for length_of in re.findall(r"\blen\s*\(\s*([A-Za-z_][\w.]*)", call):
+            # Counting things WE shipped is fine and provably survived the real filter
+            # ("Loaded 5 fold models on cuda"). Counting anything derived from the test data
+            # is not. Default to flagging, since the cost of a false negative is a
+            # disqualification warning and the cost of a false positive is one line of config.
+            if length_of.split(".")[0] not in SAFE_TO_COUNT:
+                problems.append(
+                    f"main.py:{line_no}: logs len({length_of}) - if that is derived from the "
+                    "test data it discloses the test set size"
+                )
+        # A row index reveals a lower bound on the row count, and the final one reveals it
+        # exactly. `enumerate` over the submission frame is the usual way this creeps in.
+        if re.search(r"\b(row|idx|index)\b\s*[:=}]|\{\s*i\s*[+}]", call, flags=re.IGNORECASE):
+            problems.append(f"main.py:{line_no}: logs a row index - discloses test set size")
+
+    return problems
+
+
 def check_checkpoints(checkpoints: list[Path], baked: dict[str, object]) -> list[str]:
     """Load every shipped checkpoint into the exact architecture `main.py` will construct.
 
@@ -190,6 +232,7 @@ def build(baked: dict[str, object], prior_only: bool = False) -> int:
 
     py_files = sorted(BUILD_DIR.rglob("*.py"))
     problems += check_imports(py_files) + check_independence(main_path)
+    problems += check_logging(main_path)
 
     print("Pre-flight checks")
     print(f"  python files vendored : {len(py_files)}")

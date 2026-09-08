@@ -16,7 +16,7 @@ Rules for this file:
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | 0 | 2026-09-05 | — | — | **prior baseline** (predict 0.5485 for everything) | **0.6884** | — | 0.500 | — | — | — | the floor; anything worse than this is not a model. n=1362, 747 pos / 615 neg |
 | 0b | 2026-09-05 | — | | **prior-only submission** (`--prior-only --fallback 0.5485`), no weights | — | — | 0.500 | — | **0.6687** (smoke) | — | wire test passed: platform contract proven end to end. Score implies smoke-set positive rate ≈ 0.65 vs train 0.5485 — see note below before believing it |
-| 1 | 2026-09-08 | `baseline.yaml` | | first end-to-end run: 96³ @ 2.0 mm, `crop: com`, ResNet3D, 5-fold stratified | **0.3186** | not yet run | 0.9302 | 0.0220 | _packaged, awaiting score_ | yes | temperature = 1.2614, clip 1e-06. Beats the prior by 0.3698. See the calibration note below — the first evaluation of this run was wrong |
+| 1 | 2026-09-08 | `baseline.yaml` | | first end-to-end run: 96³ @ 2.0 mm, `crop: com`, ResNet3D, 5-fold stratified | **0.3186** | not run | 0.9302 | 0.0220 | **0.3210** | yes | temperature = 1.2614, clip 1e-06. **CV↔LB gap = +0.0024.** Beats the prior by 0.3698 |
 
 **Run 1 packaged 2026-09-08**: `submission.zip`, 37.9 MB, 5 fold checkpoints ensembled in logit
 space. All pre-flight checks passed, including the new one that loads every shipped checkpoint
@@ -117,6 +117,49 @@ on a 65%-positive test set, and log loss punishes that directly. The response wo
 correction applied in logit space at inference (a constant offset, shipped as a literal — still
 per-sample independent, so it stays inside the rules), *not* refitting anything on test. Revisit
 once the full test score is available, which is a much larger sample than the smoke set.
+
+### CV is trustworthy, and that changes the plan (2026-09-08)
+
+**OOF 0.3186 → leaderboard 0.3210. A gap of +0.0024, under 1% relative.**
+
+Three questions close on this single number.
+
+**1. Is CV trustworthy?** Yes. Phase 2's stated exit criterion was being able to say "my CV is
+trustworthy to within X and the leaderboard tracks it". X = 0.0024. Every Phase 3 decision can
+now be made on OOF log loss without waiting for a submission slot.
+
+**2. Is there prior shift between train and test?** No. The smoke score implied a test positive
+rate near 0.65 against a training rate of 0.5485; a shift that size would have cost far more
+than 0.0024. That observation said nothing about the test set: the smoke test runs on fake data. **Row 0b is closed.**
+
+**3. Is the grouped-CV run still worth scarce CPU?** Probably not, and this reverses the earlier
+recommendation. Grouped CV exists as a *proxy* for "will the leaderboard track my CV". The
+leaderboard has now answered that directly, to within 0.0024. Stratified CV is evidently the
+right estimator for *this* test set, which suggests the test split shares the training set's
+centre composition rather than holding out whole hospitals — in which case grouped CV would be
+actively pessimistic about leaderboard performance and would mislead if optimised against.
+
+It remains the right measurement for a different question — "would this generalise to an
+eleventh hospital" — which is a real question about the solution's worth, just not one the
+competition scores. **Run it if compute becomes cheap; do not spend a CPU night on it.**
+
+### Submission logs must not describe the test set (2026-09-08)
+
+Run 1's submission came back with a compliance warning: three log lines replaced by
+`WARNING: line filtered`, and a note that non-compliance may result in disqualification.
+
+The filtered lines were exactly the three containing `len(submission)`. The line reporting
+`Loaded 5 fold models on cuda` survived, so numbers as such are fine — **the test set's row
+count is not**, in any form: a total, a progress denominator, a row index, or a failure count.
+
+`submission_src/main.py` now reports progress as elapsed time and fallbacks as whether-not-how-
+many, and `05_package_submission.py` scans logger calls at package time (`check_logging`), with
+`tests/test_logging_compliance.py` pinning both the scanner and the shipped file.
+
+Two things worth carrying forward. First, the warning is content-based, so "log less" is the
+wrong lesson — the right one is "log nothing derived from the test data". Second, this was only
+diagnosable because the surviving line acted as a control; had every line been filtered there
+would have been nothing to reason from.
 
 ### Calibration was being selected in-sample (found and fixed 2026-09-08)
 

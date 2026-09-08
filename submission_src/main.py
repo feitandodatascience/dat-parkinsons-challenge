@@ -24,6 +24,7 @@ Local test loop:
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -49,6 +50,11 @@ TEMPERATURE = 1.0
 
 # Guard rails on the final probabilities. See datpd.utils.metrics for why this matters.
 CLIP_EPS = 1e-6
+
+# Progress heartbeat interval, in seconds. Time-based rather than row-based so the log never
+# discloses how many rows the test set has (see the note in main()). At 3 hours' budget this
+# yields ~12 lines, well inside the 300-line cap.
+HEARTBEAT_SECONDS = 900
 
 # ---------------------------------------------------------------------------------------
 # Preprocessing and architecture, baked in by scripts/05_package_submission.py from the
@@ -119,32 +125,55 @@ def predict_one(models: list[torch.nn.Module], uid: str) -> float:
 
 
 def main() -> None:
+    # ---------------------------------------------------------------------------------------
+    # LOGGING RULE, learned the hard way on 2026-09-08.
+    #
+    # The platform filtered three lines from a submission's log with "WARNING: line filtered"
+    # and a disqualification warning. The three were exactly the three containing
+    # `len(submission)`; a line reporting the number of fold models survived. **The number of
+    # rows in the test set is information about the hidden test set, and must never be
+    # logged** — not as a total, not as a denominator in a progress counter, not implied by a
+    # row index.
+    #
+    # So: no counts derived from the test data, and no row indices. Progress is reported as
+    # elapsed time, which is what actually matters for diagnosing a timeout anyway.
+    # ---------------------------------------------------------------------------------------
     submission = pd.read_csv(SUBMISSION_FORMAT_PATH)
-    logger.info(f"Loaded submission format: {len(submission)} rows")
+    logger.info("Loaded submission format")
 
     models = load_models()
+    started = time.monotonic()
 
     predictions: list[float] = []
     failures = 0
-    for i, uid in enumerate(submission["uid"]):
+    next_heartbeat = HEARTBEAT_SECONDS
+    for uid in submission["uid"]:
         try:
             p = predict_one(models, uid) if models else FALLBACK_PROB
         except Exception as exc:  # noqa: BLE001 - never crash the whole run for one scan
             failures += 1
-            # Log the exception TYPE only. The message could contain data-derived values.
+            # Exception TYPE only, and no row index: the message could carry data-derived
+            # values, and the index would disclose the test set's size.
             if failures <= 5:
-                logger.warning(f"Row {i}: {type(exc).__name__}; using fallback")
+                logger.warning(f"Prediction failed ({type(exc).__name__}); using fallback")
             p = FALLBACK_PROB
         predictions.append(p)
 
-        if (i + 1) % 200 == 0:
-            logger.info(f"Predicted {i + 1}/{len(submission)}")
+        elapsed = time.monotonic() - started
+        if elapsed >= next_heartbeat:
+            logger.info(f"Still running, {elapsed / 60:.0f} min elapsed")
+            next_heartbeat += HEARTBEAT_SECONDS
 
     submission["is_pathologic"] = np.clip(predictions, CLIP_EPS, 1.0 - CLIP_EPS)
     submission.to_csv(OUTPUT_PATH, index=False)
 
-    logger.info(f"Fallbacks used: {failures}/{len(submission)}")
-    logger.success(f"Wrote {len(submission)} predictions to {OUTPUT_PATH}")
+    # Whether fallbacks happened, not how many: a count of failures is derived from the test
+    # data, and in the worst case would equal its size.
+    if failures:
+        logger.warning("Fallback predictions were used for one or more rows")
+    else:
+        logger.info("No fallback predictions were needed")
+    logger.success(f"Wrote predictions to {OUTPUT_PATH} in {(time.monotonic() - started) / 60:.0f} min")
 
 
 if __name__ == "__main__":

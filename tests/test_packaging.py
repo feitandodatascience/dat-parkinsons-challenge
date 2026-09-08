@@ -12,6 +12,7 @@ tests, an empty `assets/`.
 from __future__ import annotations
 
 import importlib.util
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -34,21 +35,27 @@ def packager():
 
 
 @pytest.fixture(autouse=True)
-def _require_empty_assets(packager):
-    """These tests build in prior-only mode, which refuses to run if weights are present."""
-    if sorted((REPO_ROOT / "submission_src" / "assets").glob("*.pt")):
-        pytest.skip("submission_src/assets contains trained weights; prior-only build declined")
+def _isolated_build(packager, monkeypatch, tmp_path):
+    """Run every test against a disposable copy of `submission_src`, and build to a temp path.
 
+    Two separate hazards, both learned from:
 
-@pytest.fixture(autouse=True)
-def _build_somewhere_disposable(packager, monkeypatch, tmp_path):
-    """Redirect the build output away from `submission/`.
+    **Output location.** A test run must not leave a zip at the real path. It would be a
+    prior-only build carrying whatever placeholder constants these tests use, sitting exactly
+    where a finished submission belongs — and the failure mode is uploading it by mistake and
+    reading the resulting prior-level score as a modelling result.
 
-    A test run must not leave a zip at the real path. It would be a prior-only build carrying
-    whatever placeholder constants these tests happen to use, sitting exactly where a finished
-    submission belongs — and the failure mode is submitting it by mistake and reading the
-    resulting prior-level score as a modelling result.
+    **Asset isolation.** These tests build in prior-only mode, which refuses to run when
+    weights are present. Reading the real `submission_src/assets/` meant all seven tests
+    silently skipped as soon as checkpoints were staged — that is, precisely when a submission
+    is imminent and this coverage is most valuable. So they get their own empty assets
+    directory and never consult the real one.
     """
+    fake_src = tmp_path / "submission_src"
+    (fake_src / "assets").mkdir(parents=True)
+    shutil.copy2(REPO_ROOT / "submission_src" / "main.py", fake_src / "main.py")
+
+    monkeypatch.setattr(packager, "SUBMISSION_SRC", fake_src)
     monkeypatch.setattr(packager, "BUILD_DIR", tmp_path / "build")
     monkeypatch.setattr(packager, "ZIP_PATH", tmp_path / "submission.zip")
 

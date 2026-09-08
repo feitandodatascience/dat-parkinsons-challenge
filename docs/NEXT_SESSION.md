@@ -6,29 +6,30 @@ context that actually changes decisions, and nothing else.
 ---
 
 ```
-Phase 2 of docs/03_plan.md — making the validation trustworthy. 8 days to the deadline
-(2026-09-16); final model goes in Mon 2026-09-14, not later.
+Phase 3 of docs/03_plan.md — improving the model. 8 days to the deadline (2026-09-16);
+final model goes in Mon 2026-09-14, not later.
 
 Where things stand:
-- Run 1 (conf/baseline.yaml, 96³ @ 2.0mm, crop: com, ResNet3D, 5-fold stratified) scored
-  OOF log loss 0.3186 / AUROC 0.9302, against a prior baseline of 0.6884. Packaged and
-  submitted. Leaderboard score: <FILL IN, or say "not back yet">.
-- Read reports/experiments/log.md first — rows 0, 0b, 1 and the notes under them. The
-  calibration note and the fold-structure note are the two that matter.
+- Run 1 (conf/baseline.yaml, 96³ @ 2.0mm, crop: com, ResNet3D, 5-fold stratified):
+  OOF log loss 0.3186, AUROC 0.9302, prior baseline 0.6884.
+  LEADERBOARD 0.3210 — a CV↔LB gap of +0.0024, so CV is trustworthy and I can make
+  decisions on OOF alone without burning submission slots.
+- Read reports/experiments/log.md first — row 1 and the note "CV is trustworthy, and that
+  changes the plan". Grouped CV is deprioritised there; don't reflexively suggest it.
 - Environment: .venv on Python 3.12.3, torch 2.12.1+cpu. NO CUDA GPU on this machine
-  (Intel Iris Xe). Always invoke as .venv\Scripts\python.exe.
+  (Intel Iris Xe), so a 96³ 5-fold run is a whole night. Always invoke as
+  .venv\Scripts\python.exe.
 - Cloud GPU: <FILL IN — did DrivenData answer the forum question about uploading data to
-  rented compute?>
+  rented compute? This gates everything expensive.>
 
 What I want this session:
-1. The grouped-CV number. conf/grouped_cv.yaml has not been run. Given a 46–59% positive
-   rate spread across acquisition families, the strat-vs-group gap is the most informative
-   measurement left — it tells me whether 0.3186 survives unseen centres.
-2. Then the Phase 3 shortlist, ranked by expected log-loss gain per hour of CPU.
+1. A ranked Phase 3 shortlist by expected log-loss gain PER HOUR OF CPU, given ~5 usable
+   compute nights left. Be specific about what I can afford, not what would be ideal.
+2. Start the top item.
 
-Constraints to respect, from CLAUDE.md §0: you never read the competition data. I run the
-scripts; you read reports/eda/shared/ and reports/experiments/ only. If you need something
-about the data, write me a script.
+Constraints, from CLAUDE.md §0: you never read the competition data. I run the scripts; you
+read reports/eda/shared/ and reports/experiments/ only. If you need something about the
+data, write me a script.
 ```
 
 ---

@@ -104,7 +104,27 @@ submission.zip
 | Hardware | 1x NVIDIA A100 80GB, 24 vCPU, 220 GB RAM |
 | Time limit | **3 hours** full run, **6 minutes** smoke test |
 | Network | **None** |
-| Logging | ≤ 300 lines, ≤ 300 chars/line |
+| Logging | ≤ 300 lines, ≤ 300 chars/line, **and nothing describing the test data** |
+
+> **The logging restriction is about content, not just volume — confirmed 2026-09-08.** A
+> submission came back with three lines replaced by `WARNING: line filtered` and an explicit
+> disqualification warning. The filtered lines were exactly the three containing
+> `len(submission)`:
+>
+> ```
+> < ... WARNING: line filtered >                        Loaded submission format: N rows
+> 2026-09-08 ... Loaded 5 fold models on cuda           <- survived
+> < ... WARNING: line filtered >                        Fallbacks used: F/N
+> < ... WARNING: line filtered >                        Wrote N predictions to submission.csv
+> ```
+>
+> Numbers are not the problem — the line counting *our own* shipped fold models was untouched.
+> **The number of rows in the test set is the problem**, in any form: a total, a progress
+> denominator (`Predicted 200/N`), or a row index (which bounds it, and on the last row gives it
+> exactly). Report progress as elapsed time instead, and report failures as *whether* rather
+> than *how many* — a failure count is also derived from the test data.
+>
+> `scripts/05_package_submission.py` now scans `main.py` for these patterns at package time.
 
 > **This A100 is for scoring your submission, not for training on.** It runs `main.py` against
 > the test set, and "no retraining at inference" is a competition rule (§1.1) — so it cannot be
