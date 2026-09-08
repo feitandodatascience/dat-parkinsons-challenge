@@ -103,6 +103,8 @@ submission.zip
 | Python | **3.12 only** |
 | Hardware | 1x NVIDIA A100 80GB, 24 vCPU, 220 GB RAM |
 | Time limit | **3 hours** full run, **6 minutes** smoke test |
+| Submission limit | **3 per rolling 7 days** — the scarcest resource in the project |
+| Smoke tests | **Free and unlimited.** Excluded from the limit *and* the leaderboard, and run against **fake data** — so a smoke score says nothing about the model. Use them to validate the code path, never to estimate a score. |
 | Network | **None** |
 | Logging | ≤ 300 lines, ≤ 300 chars/line, **and nothing describing the test data** |
 

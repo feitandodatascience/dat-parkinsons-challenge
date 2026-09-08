@@ -92,7 +92,23 @@ log loss degrades means calibration, not architecture.
 validates on 115; fold 0 trains on 902 and validates on 460. Only pooled OOF means anything.
 Per-fold numbers are for spotting a fold that fell over.
 
-### Possible prior shift between train and test (open, 2026-09-05)
+### Possible prior shift between train and test (VOID — see the correction below)
+
+> **Correction, 2026-09-08: the entire section below rests on a false premise.** The platform's
+> smoke test runs against **fake data** — "a small set of fake data", excluded from both the
+> submission limit and the leaderboard. Row 0b's 0.6687 was therefore scored on synthetic
+> labels, and **no** statement about the real test set's positive rate can be inferred from it.
+> The arithmetic below is correct and the conclusion it reaches is meaningless.
+>
+> This is a better reason to close row 0b than the one recorded further down, which argued the
+> observation was sampling noise. It was not noise — it was a measurement of something else
+> entirely. Keep the section as written, because the mistake is instructive: a number that
+> *could* be computed was computed, and the question of what it measured got asked afterwards.
+>
+> The real prior-shift evidence is run 1's CV↔LB gap of **+0.0024**, which is on real data and
+> settles it: no meaningful shift.
+
+### The original argument (2026-09-05)
 
 The prior-only submission scored **0.6687** on the smoke set. For a constant prediction `p`
 against a test set with positive rate `q`, `logloss = 0.7952 - 0.1947·q` at `p = 0.5485`, so
@@ -134,6 +150,9 @@ now be made on OOF log loss without waiting for a submission slot.
 **2. Is there prior shift between train and test?** No. The smoke score implied a test positive
 rate near 0.65 against a training rate of 0.5485; a shift that size would have cost far more
 than 0.0024. That observation said nothing about the test set: the smoke test runs on fake data. **Row 0b is closed.**
+      *(Superseded 2026-09-08: it was not noise. The smoke test runs on **fake data**, so row
+      0b's score measured nothing about the real test set at all. Row 0b stays closed, for a
+      stronger reason. See the correction above the prior-shift section.)*
 
 **3. Is the grouped-CV run still worth scarce CPU?** Probably not, and this reverses the earlier
 recommendation. Grouped CV exists as a *proxy* for "will the leaderboard track my CV". The
