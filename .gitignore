@@ -10,6 +10,18 @@ data/
 train_labels.csv
 submission_format.csv
 
+# Archives, anywhere in the tree. CLAUDE.md 0 names archives as guarded, but the rules above
+# only match extracted data under data/ — so the downloads themselves (niftis_*.zip,
+# smoke_test_data_*.tar.gz) slipped through and were committed on 2026-09-08: 660 MB of patient
+# imaging, tracked in git, because they had been left in tests/ rather than moved out of the
+# repo. Match on extension, not location — the mistake was the file being somewhere unexpected.
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+
 # Quarantined EDA output: may contain per-sample values (see CLAUDE.md 0.3).
 reports/eda/raw/
 !reports/eda/raw/.gitkeep
