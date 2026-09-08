@@ -17,6 +17,9 @@ Rules for this file:
 | 0 | 2026-09-05 | — | — | **prior baseline** (predict 0.5485 for everything) | **0.6884** | — | 0.500 | — | — | — | the floor; anything worse than this is not a model. n=1362, 747 pos / 615 neg |
 | 0b | 2026-09-05 | — | | **prior-only submission** (`--prior-only --fallback 0.5485`), no weights | — | — | 0.500 | — | **0.6687** (smoke) | — | wire test passed: platform contract proven end to end. Score implies smoke-set positive rate ≈ 0.65 vs train 0.5485 — see note below before believing it |
 | 1 | 2026-09-08 | `baseline.yaml` | | first end-to-end run: 96³ @ 2.0 mm, `crop: com`, ResNet3D, 5-fold stratified | **0.3186** | not run | 0.9302 | 0.0220 | **0.3210** | yes | temperature = 1.2614, clip 1e-06. **CV↔LB gap = +0.0024.** Beats the prior by 0.3698 |
+| 2 | 2026-09-08 | — | | **per-family error decomposition** (`06_score_by_group.py`), no training | — | — | — | — | — | n/a | measurement, not a model. Leave-one-family-out temperature transfer penalty **+0.0006**; per-centre oracle prior correction worth at most **0.004**. Closes row 0b |
+| 3 | 2026-09-08 | `baseline.yaml` | | **TTA**, 9 laterality-preserving views on the run-1 checkpoints | **0.3164** | — | 0.9306 | 0.0269 | not submitted | marginal | gain **−0.0022**, temperature falls to 1.2457. AUROC +0.0004, so the gain is variance reduction, not ranking. Same order as the CV↔LB gap |
+| 4 | 2026-09-08 | `baseline.yaml` | | **SBR features + gradient boosting, stacked onto the CNN** | **0.3048** | — | — | — | not submitted | **yes** | gain **−0.0175**, cross-validated. Trees alone 0.3919 / AUROC 0.9046; logit correlation 0.797. Largest measured gain in the project |
 
 **Run 1 packaged 2026-09-08**: `submission.zip`, 37.9 MB, 5 fold checkpoints ensembled in logit
 space. All pre-flight checks passed, including the new one that loads every shipped checkpoint
@@ -190,6 +193,53 @@ with an explicit note when that differs from the winner.
 
 General lesson, applicable to every comparison from here: **the more flexible method wins any
 comparison scored on its own training data.** Always hold something out.
+
+### Phase 3, first three experiments (2026-09-08)
+
+Rows 2-4. All three reuse run 1's checkpoints, so together they cost under an hour of CPU
+against the ~2 days a retraining run would take (docs/05). Full reports sit beside this file.
+
+**Row 2 closed two open questions.** The leave-one-family-out temperature transfer penalty is
+**+0.0006** — the calibration constant is a property of the model, not of the centre mix it was
+fitted on, so the shipped T is safe on unseen centres. And per-family *oracle* logit offsets,
+using each family's own labels, reach only 0.3142 against 0.3186 for the plain global
+temperature: a ceiling of about **0.004** on any per-centre prior correction, with cheating.
+**Row 0b is closed.**
+
+**One lead is still open.** The largest acquisition family, `256@2.5mm` (n=460, 34% of the
+data), is the weakest of the large families: log loss 0.3691 and AUROC 0.9176, against 0.2339
+and 0.9560 for `128@2.4mm`. Spacing does not separate those two; **field of view does** — 640 mm
+against 307 mm — and EDA already recorded that the head occupies ~1% of the array in the widest
+acquisitions, where centre-of-mass cropping has least margin. `scripts/10_features_by_family.py`
+tests this in seconds via `box_max / global_max`, which is ~1 when the crop caught the striatum.
+Not yet run. A crop fix would need a retraining run, so confirm the pattern before spending it.
+
+**Row 3 (TTA) is a marginal keep at best.** −0.0022 is the same order as the CV↔LB gap of
++0.0024, so it may not be visible on the leaderboard at all. AUROC barely moved, so it is buying
+variance reduction rather than better ranking. The shipping path is built and tested
+(`05_package_submission.py --tta`, off by default and bit-identical when off), so the marginal
+cost of including it is near zero — but it is a moving part in `main.py` five days out.
+
+**Row 4 (the blend) is the real result.** Stacking is worth **−0.0175**, eight times TTA, and
+the evidence holds up: the two logit vectors correlate 0.797 so the tree model genuinely
+disagrees with the CNN; in-sample 0.3000 against cross-validated 0.3048 is only 0.0048 of
+optimism on three parameters; and the comparison is a nested-model test with the same estimator
+and folds on both sides, so the gain is not recalibration the CNN would have had anyway.
+
+Two traps were found and fixed while building it, both recorded in `scripts/09_blend.py`. A
+convex blend weight conflates mixing with calibration — lowering it shrinks the CNN's logits,
+which is temperature scaling by another name, and against an overconfident CNN a *pure noise*
+second model then scores an apparent gain. And the fold column must be stratified: on
+unstratified folds a tree model fitted on noise learns each fold's training base rate, which is
+anti-correlated with its own, and manufactures a gain from nothing.
+
+**Still to do before either ships.** Put both through `scripts/11_compare_runs.py`, which does a
+*paired* per-scan comparison — the unpaired standard error at n=1362 is ~0.016 and would call a
+0.002 change unresolvable, while the paired one is of the difference itself. Then, for the
+blend: refit the tree model on `lightgbm` rather than scikit-learn, whose pickle format is
+fragile against whatever version the runtime has, and vendor it with the stack coefficients.
+`src/datpd/features.py` is already the single definition of the 61 features and is already
+vendored, so inference cannot drift from what the model was fitted on.
 
 ### Decisions made
 
