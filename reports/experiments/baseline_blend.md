@@ -42,3 +42,12 @@ have, whatever the tree model scores on its own.
 Next: teach `submission_src/main.py` to compute these features per scan and carry
 the fitted model. Refit on lightgbm rather than scikit-learn first — its text
 booster format does not depend on the library version the runtime happens to have.
+
+## Verify it
+
+The held-out blended predictions are banked as a run of their own, so the improvement
+can be given a standard error instead of being read off the pooled numbers above:
+
+```bash
+python scripts/11_compare_runs.py --run-a baseline --run-b baseline_blend
+```
