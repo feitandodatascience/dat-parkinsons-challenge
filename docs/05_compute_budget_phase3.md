@@ -43,35 +43,56 @@ Mon 14 Sep lock-down. If R ≈ 48 h, that is **~2.5 R total**. Spend it delibera
 | 1 | Per-family error decomposition + LOGO temperature | **0** | 0 to −0.02 | ∞ | **do first, today** |
 | 2 | Test-time augmentation on existing checkpoints | **~0.02 R** | −0.005 to −0.02 | very high | **do** |
 | 3 | SBR-style features → GBM → logit blend | **~0.03 R** | −0.01 to −0.03 | very high | **do** |
-| 4 | Grouped CV, folds ordered by size, stop when needed | 0.36–1.0 R | measurement, not gain | — | **do, in background** |
-| 5 | Second seed, ensembled | 1.0 R | −0.005 to −0.015 | low | only if 4 finishes early |
-| 6 | Label smoothing 0.05 | 1.0 R | ~0 | low | **skip** |
-| 7 | `flip_lr` ablation | 1.0 R | likely +ve (worse) | low | **skip** |
+| 4 | Second seed, ensembled | 1.0 R | −0.005 to −0.015 | low | only if a night is spare |
+| 5 | Label smoothing 0.05 | 1.0 R | ~0 | low | **skip** |
+| 6 | `flip_lr` ablation | 1.0 R | likely +ve (worse) | low | **skip** |
+| 7 | Grouped CV | 0.36–1.0 R | answers a question the LB already answered | low | **deprioritised** |
 | 8 | 128³ @ 1.5 mm | **2.4 R** | −0.02 to −0.05 | unreachable | **rule out** |
 | 9 | Pretrained 3D backbone (DenseNet121) | >2 R | unknown | unreachable | **rule out** |
 | 10 | 2.5D timm model | >2 R | unknown | unreachable | **rule out** |
+
+> **Revised 2026-09-08, after the leaderboard came back.** Run 1 scored **0.3210** against an
+> OOF of 0.3186 — a gap of +0.0024. That single number moved grouped CV from #4 to #7. Grouped
+> CV is a *proxy* for "will the leaderboard track my CV"; the leaderboard has now answered
+> directly, and stratified CV is evidently the right estimator for this test set. Running it
+> would measure generalisation to an unseen eleventh hospital — a real question about the
+> solution's worth, but not one the competition scores, and not worth a CPU night at this
+> point in the calendar. The reasoning is in `reports/experiments/log.md`.
+>
+> Items 1–3 get *more* valuable from the same number, not less: a trustworthy CV means each of
+> them can be accepted or rejected on OOF alone, with no submission slot spent finding out.
 
 ### 1. Per-family error decomposition — free
 
 `python scripts/06_score_by_group.py --run baseline`
 
-Runs in seconds against the OOF predictions run 1 already produced. It answers Phase 2's second
-task ("is one centre carrying all the error?") and, more importantly, produces the
-**leave-one-family-out temperature transfer penalty**: fit the calibration on every acquisition
-family except one, apply it to the held-out one, pool.
+Runs in seconds against the OOF predictions run 1 already produced. Two outputs.
 
-That number is the *calibration half* of the stratified-to-grouped gap, and it is the half that
-actually transfers to the leaderboard, because the submission ships exactly one scalar
-temperature that has to work on centres it has never seen. It cannot measure the other half —
-whether the network's features are centre-specific — because these folds are stratified and the
-model saw every family in training. **It is a lower bound on the grouped gap, not a substitute
-for item 4.**
+**Per-family AUROC.** The question worth asking now that the leaderboard has validated CV: is
+discrimination uniform across acquisition families, or is one family carrying most of the error?
+A family with visibly worse AUROC is not a calibration problem — it points at preprocessing
+failing on that geometry, most plausibly the COM crop on the widest fields of view, where the
+head occupies ~1% of the array. That is a fixable bug with real log loss attached, and it costs
+nothing to look for.
 
-It also bounds the row-0b prior-shift question: the report's last section gives every family its
-own oracle logit offset and reports the pooled result. If that headroom is small, per-centre
-prior shift is second-order and the question can be closed.
+**Leave-one-family-out temperature transfer.** Fit the calibration on every family except one,
+apply it to the held-out one, pool. The shipped submission carries a single scalar temperature,
+so this checks that the constant is a property of the model rather than of the centre mix it was
+fitted on. Less urgent than it was before the leaderboard came back — the test set evidently
+resembles the training composition — but it is free, and it is the cheap half of the question
+grouped CV would have answered expensively.
+
+The report's last section also bounds the row-0b prior-shift question from the other side, by
+giving each family an oracle logit offset and reporting the ceiling that per-centre prior
+correction could ever reach.
 
 ### 2. Test-time augmentation — ~0.02 R
+
+```bash
+python scripts/07_tta.py --config conf/baseline.yaml --run baseline --limit 40   # smoke first
+python scripts/07_tta.py --config conf/baseline.yaml --run baseline
+python scripts/04_evaluate.py --run baseline_tta
+```
 
 Forward passes only, no retraining. A full OOF pass with k=8 augmentations is ~11k forward
 passes against the ~500k forward-equivalents that R buys, hence the 2%.
@@ -97,18 +118,33 @@ striatal-box uptake relative to the occipital reference region, left/right asymm
 putamen-to-caudate gradient along the anterior-posterior axis, and the shape descriptors that
 distinguish a comma from a dot (eccentricity, extent of the supra-threshold region).
 
-Two traps:
+```bash
+python scripts/08_sbr_features.py --config conf/baseline.yaml --limit 50   # smoke first
+python scripts/08_sbr_features.py --config conf/baseline.yaml            # ~30 min
+python scripts/09_blend.py --run baseline                                 # seconds
+```
 
-- **Blend weight must be chosen out-of-sample.** Fitting the CNN/GBM mixing weight on the OOF set
-  and then reporting the OOF score of that blend is the same in-sample error that made isotonic
-  regression "win" on 2026-09-08. Use the cross-validation-within-OOF pattern from
-  `choose_calibrator`.
-- Recalibrate the blend. An ensemble's calibration is not its members' calibration.
+Three traps, two of which were found by writing this and are now guarded in the scripts:
 
-### 4. Grouped CV — 0.36 R to 1.0 R, and it is interruptible
+- **The blend weight must be chosen out of sample**, or it is the isotonic mistake one level up.
+- **A convex weight `w*cnn + (1-w)*gbm` conflates mixing with calibration.** Lowering `w` also
+  shrinks the CNN's logits, which is temperature scaling by another name — so against an
+  overconfident CNN, a *pure noise* second model scores an apparent gain. `09_blend.py` fits a
+  logistic stack instead and compares against the same stack over the CNN alone, so both sides
+  carry the same recalibration and the difference is attributable to the features.
+- **The fold column must be stratified on the label.** A tree model cross-validated on
+  unstratified folds picks up each fold's training base rate, which is anti-correlated with its
+  own, and manufactures a small gain from nothing. `fold_strat` is safe; do not substitute
+  `fold_group` here.
 
-This is the number this phase exists to get, and the infrastructure to get it cheaply already
-exists. `train.py` banks `oof_fold<k>.csv` the moment each fold finishes, and
+One caveat on shipping: the script uses scikit-learn's `HistGradientBoostingClassifier` because
+it is already installed locally. If the blend pays, refit with `lightgbm` before shipping — its
+text booster format survives a version difference that a scikit-learn pickle would not.
+
+### 7. Grouped CV — deprioritised, but here is how to run it cheaply
+
+No longer the priority (see the revision note above), but if a night comes free the
+infrastructure to get it cheaply already exists. `train.py` banks `oof_fold<k>.csv` the moment each fold finishes, and
 `scripts/04_evaluate.py` assembles a partial OOF from whatever completed. So do not commit to
 five folds up front — **run the folds largest-validation-set first and stop when the CPU is
 needed elsewhere**:
@@ -139,7 +175,7 @@ temperature). Both degrading is a representation problem, and at this point in t
 there is no time to fix that — the response would be to ship a more conservative temperature and
 accept it.
 
-### 6–7. Why label smoothing and `flip_lr` come off the list
+### 5–6. Why label smoothing and `flip_lr` come off the list
 
 Not because they are bad ideas — because each costs a full R to evaluate and neither is likely
 to repay it *here*.
@@ -168,16 +204,27 @@ before it is worth benchmarking.
 
 ## 3. The suggested order
 
-1. **Now**: item 1 (free). Read the transfer penalty before deciding how much item 4 is worth.
-2. **Tonight**: start item 4 in the background with the fold ordering above. Let it run.
-3. **Wed 9 – Thu 10**: items 2 and 3 in the foreground, accepting that they contend with item 4
-   for cores. Both are short enough that the contention costs less than the serialisation would.
-4. **Fri 11 – Sat 12**: stop item 4 wherever it is. Score it. Decide the final shipped
-   temperature from the grouped result and the LOGO penalty together — pick the more
-   conservative of the two.
-5. **Sun 13**: freeze. Repackage, Docker smoke test, audit `main.py` against §1.1 and the
-   logging rule.
-6. **Mon 14**: submit. Two days of buffer remain, deliberately.
+Items 1–3 together cost under **0.06 R** — a couple of hours, not a night. That is the whole
+argument for doing them first: they are decided before any expensive option would have finished
+its first fold, and a trustworthy CV (gap +0.0024) means each can be accepted or rejected on OOF
+alone.
 
-The thing most likely to go wrong is not modelling. It is spending Saturday on item 8 because a
-GPU appeared, and arriving at Monday with weights that were never packaged.
+1. **Item 1** (seconds). Read the per-family AUROC before anything else — if one acquisition
+   family is carrying the error, fixing that outranks everything below.
+2. **Item 2**, smoke first with `--limit 40`, then the full pass. Score with `04_evaluate.py`,
+   which refits the temperature; TTA softens logits, so the existing T=1.2614 will not apply.
+3. **Item 3**, smoke first with `--limit 50`. Feature extraction is the slow half (~30 min);
+   the blend itself is seconds and can be re-run freely.
+4. Log all three in `reports/experiments/log.md`, **including the ones that do not pay**. A
+   negative result recorded today is what stops it being retried on the 14th.
+5. Only then consider item 4 (a second seed) with whatever nights remain.
+6. **Sun 13**: freeze. Repackage, Docker smoke test, audit `main.py` against §1.1 and the
+   logging rule.
+7. **Mon 14**: submit. Two days of buffer remain, deliberately.
+
+If a GPU appears before Sat 12 Sep, stop and spend it on item 8 (128³ @ 1.5 mm) ahead of
+everything here. It is very likely the largest single win available and it is the only one this
+hardware cannot reach.
+
+The thing most likely to go wrong is not modelling. It is arriving at Monday with an improvement
+that was measured but never packaged.

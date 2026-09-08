@@ -1,0 +1,198 @@
+"""Tests for scripts/07_tta.py, on SYNTHETIC volumes only.
+
+The properties worth pinning are geometric, so none of this needs a trained model or a real
+scan. The one that matters most is `test_no_view_flips_laterality`: the whole reason this TTA
+set is hand-written rather than "the usual eight flips" is that a left-right flip would destroy
+diagnostic asymmetry, and a regression there would be silent.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import sys
+from pathlib import Path
+
+import numpy as np
+import pytest
+import torch
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+_spec = importlib.util.spec_from_file_location("tta", REPO_ROOT / "scripts" / "07_tta.py")
+assert _spec is not None and _spec.loader is not None
+tta = importlib.util.module_from_spec(_spec)
+sys.modules["tta"] = tta
+_spec.loader.exec_module(tta)
+
+IDENTITY = (0.0, (1, 2), (0, 0, 0), 1.0)
+
+
+def asymmetric_volume(shape: tuple[int, int, int] = (32, 32, 32)) -> np.ndarray:
+    """Two blobs along axis 0, the one on the low side brighter.
+
+    Stands in for a DaT scan with a more-affected side. Any transform that mirrors axis 0 will
+    move the bright blob to the other end, which is what the laterality test detects.
+    """
+    array = np.full(shape, 0.1, dtype=np.float32)
+    cx, cy, cz = (s // 2 for s in shape)
+    xx, yy, zz = np.ogrid[: shape[0], : shape[1], : shape[2]]
+    for offset, strength in ((-6, 1.0), (+6, 0.4)):
+        blob = np.exp(
+            -(((xx - cx - offset) ** 2 + (yy - cy) ** 2 + (zz - cz) ** 2) / (2 * 3.0**2))
+        )
+        array += (strength * blob).astype(np.float32)
+    return array
+
+
+def lateral_balance(array: np.ndarray) -> float:
+    """Signed mass difference between the two halves of axis 0."""
+    half = array.shape[0] // 2
+    return float(array[:half].sum() - array[half:].sum())
+
+
+class TestMakeView:
+    def test_identity_is_a_no_op(self) -> None:
+        array = asymmetric_volume()
+        out = tta.make_view(array, *IDENTITY)
+        assert out.shape == array.shape
+        np.testing.assert_allclose(out, array, atol=1e-5)
+
+    def test_shape_is_always_preserved(self) -> None:
+        array = asymmetric_volume((24, 28, 32))
+        for view in tta.VIEW_PRESETS["default"]:
+            assert tta.make_view(array, *view).shape == array.shape
+
+    def test_shift_moves_content_by_the_requested_amount(self) -> None:
+        array = asymmetric_volume()
+        shifted = tta.make_view(array, 0.0, (1, 2), (0, 3, 0), 1.0)
+        # Content moves +3 along axis 1, so the interior should match the original offset back.
+        np.testing.assert_allclose(shifted[:, 6:20, :], array[:, 3:17, :], atol=2e-2)
+
+    def test_rotation_is_approximately_invertible(self) -> None:
+        array = asymmetric_volume()
+        there = tta.make_view(array, +6.0, (1, 2), (0, 0, 0), 1.0)
+        back = tta.make_view(there, -6.0, (1, 2), (0, 0, 0), 1.0)
+        # Interpolation blurs, so compare the interior loosely rather than exactly.
+        assert np.corrcoef(back[8:24, 8:24, 8:24].ravel(), array[8:24, 8:24, 8:24].ravel())[
+            0, 1
+        ] > 0.99
+
+    @pytest.mark.parametrize(
+        "scale,expected_radius",
+        [(0.87, 5), (1.0, 6), (1.15, 7)],
+    )
+    def test_scale_moves_a_feature_toward_or_away_from_the_centre(
+        self, scale: float, expected_radius: int
+    ) -> None:
+        """Magnification pushes structure outward; minification pulls it in.
+
+        Tracked as the displacement of a single delta, which states the geometry directly. An
+        intensity-weighted moment over the whole volume does NOT work here and the reason is
+        worth recording: the background occupies most of the voxels, so such a metric mostly
+        measures how much bright mass exists relative to it, and magnifying a centrally-placed
+        blob moves that metric the wrong way.
+        """
+        array = np.zeros((33, 33, 33), dtype=np.float32)
+        array[16, 22, 16] = 1.0  # 6 voxels from the centre along axis 1
+
+        out = tta.make_view(array, 0.0, (1, 2), (0, 0, 0), scale)
+        peak = np.unravel_index(int(np.argmax(out)), out.shape)
+        assert peak[1] - 16 == expected_radius
+
+    def test_rejects_a_degenerate_rotation_plane(self) -> None:
+        array = asymmetric_volume()
+        with pytest.raises(ValueError, match="rotation plane"):
+            tta.make_view(array, 5.0, (1, 1), (0, 0, 0), 1.0)
+
+    def test_rejects_non_3d_input(self) -> None:
+        with pytest.raises(ValueError, match="3D volume"):
+            tta.make_view(np.zeros((8, 8)), *IDENTITY)
+
+
+class TestLaterality:
+    def test_no_view_flips_laterality(self) -> None:
+        """Every shipped view must keep the brighter side on the side it started."""
+        array = asymmetric_volume()
+        reference = lateral_balance(array)
+        assert reference > 0, "fixture should start with the low side brighter"
+
+        for preset, views in tta.VIEW_PRESETS.items():
+            for view in views:
+                out = tta.make_view(array, *view)
+                assert lateral_balance(out) > 0, f"{preset} view {view} mirrored the volume"
+
+    def test_a_flip_would_be_caught(self) -> None:
+        """Guards the guard: the detector must actually notice a mirrored volume."""
+        array = asymmetric_volume()
+        assert lateral_balance(np.flip(array, axis=0).copy()) < 0
+
+    def test_views_preserve_asymmetry_magnitude(self) -> None:
+        array = asymmetric_volume()
+        reference = lateral_balance(array)
+        for view in tta.VIEW_PRESETS["default"]:
+            out = tta.make_view(array, *view)
+            # Small perturbations should not wash out the asymmetry the model reads.
+            assert lateral_balance(out) > 0.5 * reference
+
+
+class TestPresets:
+    def test_identity_view_is_first_in_every_preset(self) -> None:
+        """`--views identity` must reproduce the original single-view predictions exactly."""
+        for preset, views in tta.VIEW_PRESETS.items():
+            assert views[0] == IDENTITY, f"{preset} does not start from the identity view"
+
+    def test_presets_have_no_duplicate_views(self) -> None:
+        for preset, views in tta.VIEW_PRESETS.items():
+            assert len(set(views)) == len(views), f"{preset} repeats a view"
+
+    def test_rotations_come_in_signed_pairs(self) -> None:
+        """An unbalanced rotation set biases the average toward one orientation."""
+        for preset, views in tta.VIEW_PRESETS.items():
+            rotations = sorted(
+                (deg, axes) for deg, axes, _, _ in views if deg
+            )
+            for deg, axes in rotations:
+                assert (-deg, axes) in rotations, f"{preset} lacks the mirror of {deg} in {axes}"
+
+
+class TestPredictViews:
+    def test_averages_in_logit_space(self) -> None:
+        """A model returning a constant logit must yield exactly that logit, not its mean prob."""
+
+        class ConstantLogit(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return torch.full((x.shape[0], 1), 2.0)
+
+        array = asymmetric_volume()
+        out = tta.predict_views(
+            ConstantLogit(), array, tta.VIEW_PRESETS["default"], torch.device("cpu")
+        )
+        assert out == pytest.approx(2.0)
+
+    def test_one_forward_pass_per_view(self) -> None:
+        class Counting(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.seen = 0
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                self.seen += x.shape[0]
+                return torch.zeros((x.shape[0], 1))
+
+        model = Counting()
+        views = tta.VIEW_PRESETS["default"]
+        tta.predict_views(model, asymmetric_volume(), views, torch.device("cpu"))
+        assert model.seen == len(views)
+
+    def test_identity_preset_matches_a_plain_forward_pass(self) -> None:
+        class Sum(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x.flatten(1).sum(dim=1, keepdim=True) / 1000.0
+
+        array = asymmetric_volume()
+        model = Sum()
+        via_tta = tta.predict_views(
+            model, array, tta.VIEW_PRESETS["identity"], torch.device("cpu")
+        )
+        direct = float(model(torch.from_numpy(array).float()[None, None]).item())
+        assert via_tta == pytest.approx(direct, rel=1e-5)
