@@ -46,9 +46,50 @@ the organizers described as the thing to check for.
 | Option | Verdict | Why |
 |---|---|---|
 | **Vast.ai**, **RunPod Community Cloud** | **Ruled out** | GPUs are hosted on third parties' own hardware. The machine's owner has physical access to the disk. Fails condition 2 outright, and condition 3 is unverifiable. Not defensible for patient imaging under any price argument. |
-| **Kaggle Notebooks** | **Ruled out** | Kaggle's terms take a licence in uploaded content (condition 1). Separately, uploading one organizer's competition data to a competing competition platform is indefensible on its face, whatever the licence says. |
+| **Kaggle Notebooks** (incl. the free 30 h/week GPU) | **Ruled out twice over** | Fails conditions 1 and 3, *and* would not work technically. See §2.1. |
 | **Google Colab** (+ Drive) | **Avoid** | Google's consumer terms take a broad hosting licence; backup and retention are not under the user's control (conditions 1 and 3). Colab now embeds Gemini, which puts it in the category the rule names explicitly. |
 | **Lambda Labs on-demand**, **RunPod Secure Cloud**, **AWS / GCP / Azure** | **Viable** | Provider-owned datacentres, enterprise customer-content clauses that disclaim rights in customer data, and instance teardown under the customer's control. |
+
+### 2.1 Kaggle's free 30 h/week GPU, in particular
+
+It comes up because it is free and 30 h/week comfortably exceeds what the run needs. It is ruled
+out on two independent grounds, either of which is sufficient.
+
+**Compliance.** Kaggle's ToS takes a licence in uploaded content — the standard clause is a
+worldwide, royalty-free, sublicensable, transferable licence to use, reproduce, distribute and
+prepare derivative works of it in connection with the service. That applies to Datasets you
+upload *including private ones*: "private" governs who can see the data, not what rights Kaggle
+holds. Set against the organizers' own words — "the provider's terms not granting them rights to
+retain your uploaded content" — this is a direct conflict, not a grey area. Condition 3 fails as
+well: a dataset can be deleted from the UI, but nothing commits Kaggle to purging backups, so
+"every copy deleted at the end of the challenge" cannot honestly be attested.
+
+There is also the point that is not a legal argument but would be the first question in any
+review: **Kaggle is a directly competing competition platform.** Putting DrivenData's patient
+imaging from ten French hospitals on a rival's servers is hard to defend whatever the licence
+says.
+
+**It would not work anyway.** This is decisive on its own:
+
+| | Kaggle free tier | what the plan needs |
+|---|---|---|
+| RAM | ~13–30 GB | **~100 GB** — tmpfs holds an 11.4 GB cache plus the raw volumes |
+| GPU | T4 ×2 or P100 | A100 |
+| Session cap | ~12 h, then killed; free tier is preemptible | the run must survive to completion |
+| Environment | Kaggle's Python/torch | torch 2.12.1+cu129, matching the runtime |
+
+The RAM ceiling alone kills the §3 design — there is no room for a tmpfs, so the data would have
+to be written to disk, which is the thing the design exists to avoid. And a T4 is roughly a sixth
+of an A100 for mixed-precision 3D convolution, so **a 4-hour A100 run becomes 20–30 hours**, which
+does not fit inside a 12-hour session and cannot be `nohup`-ed past one. It would mean
+checkpointing across three or four preemptible sessions and re-uploading the data each time,
+during lock-down week.
+
+**What is actually being saved.** The Lambda run costs roughly **$10–20 all in**. That is the
+entire value of this option, weighed against a rules risk on a €25,000 competition whose penalty
+is disqualification, and against a schedule whose abort line is Sat 12 Sep.
+
+*Verify Kaggle's current ToS directly rather than relying on this summary — those documents change.*
 
 ### Pick one: Lambda Labs on-demand, 1× A100 40GB
 
