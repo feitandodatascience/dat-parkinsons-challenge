@@ -50,9 +50,41 @@ the organizers described as the thing to check for.
 | **Google Colab** (+ Drive) | **Avoid** | Google's consumer terms take a broad hosting licence; backup and retention are not under the user's control (conditions 1 and 3). Colab now embeds Gemini, which puts it in the category the rule names explicitly. |
 | **Lambda Labs on-demand**, **RunPod Secure Cloud**, **AWS / GCP / Azure** | **Viable** | Provider-owned datacentres, enterprise customer-content clauses that disclaim rights in customer data, and instance teardown under the customer's control. |
 
-The hyperscalers are the most defensible on condition 1 — their customer agreements state in terms
-that the provider acquires no rights in customer content — at the cost of more setup. Lambda Labs
-on-demand is the best ratio of defensibility to time-to-first-epoch.
+### Pick one: Lambda Labs on-demand, 1× A100 40GB
+
+Not a menu — a ladder, because on-demand A100s are frequently sold out:
+
+1. **Lambda Labs on-demand.** SSH in ten minutes, instance-local NVMe, no persistent volume
+   unless one is deliberately attached, terms adequate for this.
+2. **RunPod Secure Cloud.** Explicitly *Secure*, never *Community*.
+3. **A hyperscaler only if GPU quota is already approved.** See below.
+
+**The hyperscalers have the best contract language and are still the wrong choice here.** Their
+customer agreements state in terms that the provider acquires no rights in customer content,
+which is the cleanest possible answer to condition 1. But condition 1 is not the binding
+constraint — **the calendar is**, and on the calendar Azure/AWS/GCP are the worst of the viable
+options:
+
+- **GPU quota starts at zero.** A new subscription cannot launch a GPU VM until a quota increase
+  is granted, which routinely takes days. That alone can consume the Sat 12 Sep abort line
+  before a single epoch has run.
+- **Durable storage is the default.** The tmpfs design in §3 exists to keep data off persistent
+  disk; the hyperscalers' defaults push the other way, so there is more to get right under time
+  pressure.
+- **More surface area** — resource groups, VNets, security groups, storage accounts — all of it
+  first-time setup during lock-down week.
+- **More expensive per GPU-hour** than the specialist providers.
+
+**Do not rent an H100.** The model is a small ResNet3D at batch 8 and will not saturate an A100.
+The wall clock is set by the cold cache build, which is CPU-bound: prioritise **≥ 100 GB RAM and
+≥ 16 vCPU** over GPU class.
+
+**Region: prefer the EU where the choice is free.** This is French hospital patient imaging. It is
+*not* a rules requirement — the organizers distribute the data to competitors worldwide, so they
+are plainly not restricting geography — but an EU region costs nothing and is easier to defend.
+Lambda's region choice is limited and mostly US; RunPod has EU capacity. Treat this as a
+tiebreaker between otherwise equal options, **not** as a reason to accept a multi-day quota wait
+at a hyperscaler.
 
 ## 3. The operational shape matters as much as the vendor
 

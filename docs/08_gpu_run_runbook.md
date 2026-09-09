@@ -36,12 +36,18 @@ nothing, record the negative in `log.md`, and ship what you have.
 
 ## Step 1 — Rent it
 
-From docs/07 §2, the viable options are **Lambda Labs on-demand**, **RunPod Secure Cloud**, or a
-hyperscaler. Lambda on-demand is the best ratio of defensibility to time-to-first-epoch.
+**Lambda Labs on-demand, 1× A100 40GB.** Fall back to **RunPod Secure Cloud** (never *Community*)
+if Lambda has no A100 capacity — which is common. Reasoning and the full ladder: docs/07 §2.
+
+**Not a hyperscaler**, unless GPU quota is already approved on an account you hold. Azure/AWS/GCP
+have the best contract language and the worst calendar: quota starts at zero and the increase
+request routinely takes days, which is the whole abort line.
 
 - **1× A100 40GB is enough.** The model is a small ResNet3D at batch 8; an H100 will not pay for
   itself here. What matters more is **RAM and vCPU count**, because the cold cache build is
   CPU-bound: aim for ≥ 100 GB RAM and ≥ 16 vCPU.
+- **Prefer an EU region if the provider offers one** at no delay. Not a rules requirement, just
+  cheap prudence for French patient imaging. Never worth a quota wait.
 - [ ] **No persistent filesystem.** Lambda offers one; do not attach it. Same for any provider's
       network volume, snapshot, or image. Instance-local only.
 - [ ] Note the instance id — it goes in the teardown record, docs/07 §7.
