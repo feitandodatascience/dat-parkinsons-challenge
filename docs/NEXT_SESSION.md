@@ -50,6 +50,9 @@ What I want this session:
    features, stack coefficients — ALL of them are 96³ properties and void at 128³) is the
    whole of Phase 3 re-run. Bar to clear: OOF beating 0.3061 by more than ~0.01.
    Hard stop: not training by Sat 12 Sep → abandon.
+   **The runbook is written: docs/08_gpu_run_runbook.md.** Step 0 to teardown, with
+   scripts/cloud/bootstrap_gpu_box.sh for the instance and conf/highres{,_smoke}.yaml
+   for the run. If we are executing, start at its step 0 rather than re-deriving anything.
 2. Phase 4: freeze, then write docs/SOLUTION.md, which winners must submit.
 
 Constraints, from CLAUDE.md §0: you never read the competition data. I run the scripts; you

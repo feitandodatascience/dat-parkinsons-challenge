@@ -1,0 +1,59 @@
+# Smoke test for conf/highres.yaml. Not a result — never log a row from this run.
+#
+# Two jobs, and the second one is the reason this file exists rather than a --folds flag:
+#
+# 1. Prove the 128^3 path runs end to end on the rented box before committing a night to it.
+# 2. BUILD THE PREPROCESSING CACHE. The geometry block below is byte-identical to
+#    highres.yaml, so the cache key matches and the real run pays no resampling cost. Fold 0's
+#    train and val splits together cover all 1362 scans, so ONE fold of this warms the ENTIRE
+#    cache — which is the slow, CPU-bound half of a cold high-resolution run.
+#
+# Expect this to take most of its wall clock in epoch 1 doing the resampling, then run fast.
+# If epoch 2 is not dramatically quicker than epoch 1, the cache is not being hit — stop and
+# find out why before starting the real run.
+
+run_name: highres_smoke
+seed: 42
+output_dir: models
+
+data:
+  # ---- MUST stay byte-identical to highres.yaml or the cache is wasted ----
+  root: data/raw
+  labels_csv: data/raw/train_labels.csv
+  nifti_dir: data/raw/niftis
+  folds_csv: data/interim/folds.csv
+  target_spacing_mm: [1.5, 1.5, 1.5]
+  target_shape: [128, 128, 128]
+  normalization: reference_region
+  crop: com
+  cache_dir: data/processed/cache
+  # ------------------------------------------------------------------------
+
+model:
+  name: resnet3d
+  widths: [16, 32, 64, 128]
+  dropout: 0.3
+  in_channels: 1
+
+train:
+  epochs: 2
+  batch_size: 8
+  lr: 0.0003
+  weight_decay: 0.0001
+  scheduler: cosine
+  warmup_epochs: 0
+  amp: true
+  grad_clip: 1.0
+  early_stopping_patience: 8
+  num_workers: 12
+  fold_column: fold_strat
+  folds: [0]
+
+aug:
+  flip_lr: false
+  rotate_degrees: 10.0
+  translate_mm: 5.0
+  scale_range: [0.9, 1.1]
+  intensity_jitter: 0.1
+  noise_std: 0.01
+  mixup_alpha: 0.0
