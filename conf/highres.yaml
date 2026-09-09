@@ -41,7 +41,21 @@ train:
   warmup_epochs: 2
   amp: true
   grad_clip: 1.0
-  early_stopping_patience: 8
+  # Effectively off, and deliberately so on a GPU.
+  #
+  # Early stopping exists to save CPU nights. On an A100 a fold is minutes, so it buys nothing
+  # and costs something real: `_make_scheduler` sets `T_max = epochs`, so a fold that stops at
+  # 20 of 30 selects weights trained at a rate still well above the annealed one, and never
+  # gets the low-rate endgame the cosine schedule was written to provide. Run 1 is suspected of
+  # exactly this, but its curve was never persisted, so it cannot be checked.
+  #
+  # Nothing is risked by removing it: `train_fold` already restores `best_state`, the epoch
+  # with the lowest validation log loss. Training past that point costs GPU minutes and cannot
+  # make the shipped weights worse.
+  #
+  # The run now records `history_fold*.json` and a `schedule` block in `metrics.json`, and
+  # `04_evaluate.py` reports `lr at best / peak`. Read that before choosing this value again.
+  early_stopping_patience: 999
   # Raised from 4: on a 24-vCPU cloud box the first epoch is cache-build bound, and
   # preprocessing at 1.5 mm resamples 2.37x the voxels of the baseline.
   num_workers: 12

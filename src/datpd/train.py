@@ -108,6 +108,15 @@ def train_fold(
     best_loss, best_state, best_probs, patience = float("inf"), None, None, 0
     start_epoch = 0
 
+    # The per-epoch curve, banked to disk as it goes. Previously this existed only as stdout,
+    # so once a terminal was closed the run could no longer answer questions about itself -
+    # "did early stopping fire with the loss still falling?", "how far did the cosine schedule
+    # actually get before it stopped?" - and those are exactly the questions asked afterwards.
+    # `lr` is recorded because with `T_max = cfg.train.epochs`, early stopping can end a run
+    # while the annealing is still far from complete, and nothing else would show that.
+    history: list[dict[str, float]] = []
+    history_path = out_dir / f"history_fold{fold}.json"
+
     # Per-epoch checkpointing. On a GPU a fold is minutes and this would be noise; on CPU a fold
     # is ~100 minutes, and without it any interruption - sleep, a Windows update, a closed
     # terminal - discards the entire fold. The unit of loss should be one epoch, not one fold.
@@ -123,6 +132,7 @@ def train_fold(
         best_state = state["best_state"]
         best_probs = state["best_probs"]
         patience = int(state["patience"])
+        history = list(state.get("history", []))
         print(
             f"  fold {fold}: resuming at epoch {start_epoch} "
             f"(best val_logloss so far {best_loss:.4f})",
@@ -153,18 +163,38 @@ def train_fold(
         probs = predict(model, val_loader, device)
         metrics = summarize(y_val, probs)
 
+        # Read before stepping: this is the rate the epoch just above was actually trained at,
+        # not the one the next epoch will use.
+        epoch_lr = float(optimizer.param_groups[0]["lr"])
         if cfg.train.scheduler == "plateau":
             scheduler.step(metrics["logloss"])
         else:
             scheduler.step()
 
+        train_loss = running / max(len(train_loader), 1)
+        elapsed = time.time() - start
         print(
             f"  fold {fold} epoch {epoch:3d}  "
-            f"train {running / max(len(train_loader), 1):.4f}  "
+            f"train {train_loss:.4f}  "
             f"val_logloss {metrics['logloss']:.4f}  auroc {metrics['auroc']:.4f}  "
-            f"{time.time() - start:.0f}s",
+            f"lr {epoch_lr:.2e}  {elapsed:.0f}s",
             flush=True,
         )
+
+        history.append(
+            {
+                "epoch": int(epoch),
+                "lr": epoch_lr,
+                "train_loss": float(train_loss),
+                "val_logloss": float(metrics["logloss"]),
+                "auroc": float(metrics["auroc"]),
+                "seconds": float(elapsed),
+            }
+        )
+        # Written every epoch rather than at the end of the fold: on CPU a fold is ~100 minutes
+        # and interruptions are expected, and a curve that only survives a completed fold would
+        # be missing precisely when it is most wanted.
+        history_path.write_text(json.dumps(history, indent=2), encoding="utf-8")
 
         # Model selection on validation LOG LOSS - the competition metric.
         stop = False
@@ -176,7 +206,18 @@ def train_fold(
         else:
             patience += 1
             if patience >= cfg.train.early_stopping_patience:
-                print(f"  fold {fold}: early stop at epoch {epoch}", flush=True)
+                # Say what the stop cost, not just that it happened. `T_max` is
+                # cfg.train.epochs, so stopping early leaves the cosine schedule unfinished and
+                # selects weights trained at a rate well above the annealed one - visible here
+                # as an lr that is still a large fraction of cfg.train.lr.
+                best_epoch = min(history, key=lambda h: h["val_logloss"])["epoch"]
+                print(
+                    f"  fold {fold}: early stop at epoch {epoch} "
+                    f"(best epoch {best_epoch}, val_logloss {best_loss:.4f}); "
+                    f"lr {epoch_lr:.2e} of {cfg.train.lr:.2e}, "
+                    f"{epoch + 1}/{cfg.train.epochs} of the schedule run",
+                    flush=True,
+                )
                 stop = True
 
         if cfg.train.resume:
@@ -196,6 +237,7 @@ def train_fold(
                     "best_state": best_state,
                     "best_probs": best_probs,
                     "patience": patience,
+                    "history": history,
                 },
                 tmp_path,
             )
@@ -289,8 +331,46 @@ def run(cfg: Config) -> pd.DataFrame:
         for fold, grp in result.groupby("fold")
     ]
     overall = summarize(result["is_pathologic"].to_numpy(), result["oof_pred"].to_numpy())
+
+    # Assembled from the per-fold files rather than from this process's memory, for the same
+    # reason oof.csv is: a run resumed as `--folds 2 3 4` must still produce a metrics.json
+    # describing all five folds, not the three this process happened to train.
+    history: dict[str, list[dict[str, float]]] = {}
+    schedule: list[dict[str, float]] = []
+    for path in sorted(out_dir.glob("history_fold*.json")):
+        fold_history = json.loads(path.read_text(encoding="utf-8"))
+        if not fold_history:
+            continue
+        key = path.stem.removeprefix("history_fold")
+        history[key] = fold_history
+        best = min(fold_history, key=lambda h: h["val_logloss"])
+        last = fold_history[-1]
+        schedule.append(
+            {
+                "fold": int(key),
+                "best_epoch": best["epoch"],
+                "best_val_logloss": best["val_logloss"],
+                "last_epoch": last["epoch"],
+                "epochs_configured": int(cfg.train.epochs),
+                "stopped_early": last["epoch"] + 1 < cfg.train.epochs,
+                # < 1 means the cosine anneal never finished. Weights selected at a high
+                # fraction of the peak rate have not had the low-rate endgame the schedule
+                # was written to give them.
+                "lr_at_best_over_peak": best["lr"] / cfg.train.lr if cfg.train.lr else 0.0,
+            }
+        )
+
     (out_dir / "metrics.json").write_text(
-        json.dumps({"overall": overall, "per_fold": per_fold, "config": cfg.to_dict()}, indent=2),
+        json.dumps(
+            {
+                "overall": overall,
+                "per_fold": per_fold,
+                "schedule": schedule,
+                "history": history,
+                "config": cfg.to_dict(),
+            },
+            indent=2,
+        ),
         encoding="utf-8",
     )
 

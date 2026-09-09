@@ -122,8 +122,78 @@ class TestTrainingLoop:
         assert np.isfinite(oof["oof_pred"]).all()
 
         metrics = json.loads((out_dir / "metrics.json").read_text(encoding="utf-8"))
-        assert set(metrics) == {"overall", "per_fold", "config"}
+        assert set(metrics) == {"overall", "per_fold", "schedule", "history", "config"}
         assert np.isfinite(metrics["overall"]["logloss"])
+
+
+class TestTrainingHistory:
+    """The per-epoch curve must outlive the terminal that printed it.
+
+    Run 1 could not answer "did early stopping fire while the loss was still falling?" because
+    the only record was stdout. These pin the fix.
+    """
+
+    def test_history_is_banked_per_epoch_to_its_own_file(self, synthetic_project: dict) -> None:
+        from datpd.train import run
+
+        cfg = _config(synthetic_project)
+        run(cfg)
+        out_dir = Path(cfg.output_dir) / cfg.run_name
+
+        history = json.loads((out_dir / "history_fold0.json").read_text(encoding="utf-8"))
+        assert len(history) == cfg.train.epochs, "one row per epoch trained"
+        for row in history:
+            assert set(row) == {
+                "epoch",
+                "lr",
+                "train_loss",
+                "val_logloss",
+                "auroc",
+                "seconds",
+            }
+            assert np.isfinite(row["val_logloss"])
+
+        # The rate must be the one the epoch was trained at, so it is read before the
+        # scheduler steps: epoch 0 therefore still carries the configured peak.
+        assert history[0]["lr"] == pytest.approx(cfg.train.lr)
+        # Cosine anneals monotonically, so a later epoch must never train faster.
+        assert history[-1]["lr"] <= history[0]["lr"]
+
+    def test_metrics_json_carries_the_schedule_summary(self, synthetic_project: dict) -> None:
+        from datpd.train import run
+
+        cfg = _config(synthetic_project)
+        run(cfg)
+        out_dir = Path(cfg.output_dir) / cfg.run_name
+
+        metrics = json.loads((out_dir / "metrics.json").read_text(encoding="utf-8"))
+        assert set(metrics["history"]) == {"0"}
+
+        (row,) = metrics["schedule"]
+        assert row["fold"] == 0
+        assert row["epochs_configured"] == cfg.train.epochs
+        # patience (5) exceeds epochs (2), so this run cannot stop early.
+        assert row["stopped_early"] is False
+        assert row["last_epoch"] == cfg.train.epochs - 1
+        assert 0.0 < row["lr_at_best_over_peak"] <= 1.0
+
+    def test_schedule_section_renders_only_when_history_exists(
+        self, synthetic_project: dict, tmp_path: Path
+    ) -> None:
+        """Older runs have no history_fold*.json; the report must degrade, not raise."""
+        from datpd.evaluate import _schedule_section
+        from datpd.train import run
+
+        assert _schedule_section(tmp_path) == [], "no metrics.json at all"
+
+        (tmp_path / "metrics.json").write_text(json.dumps({"overall": {}}), encoding="utf-8")
+        assert _schedule_section(tmp_path) == [], "metrics.json predating the schedule block"
+
+        cfg = _config(synthetic_project)
+        run(cfg)
+        lines = _schedule_section(Path(cfg.output_dir) / cfg.run_name)
+        assert any("Training schedule" in line for line in lines)
+        assert any("lr at best / peak" in line for line in lines)
 
     def test_the_cache_is_written_and_reused(self, synthetic_project: dict) -> None:
         """Second construction must hit the cache rather than re-resampling every volume."""

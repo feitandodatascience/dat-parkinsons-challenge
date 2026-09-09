@@ -1,0 +1,70 @@
+# Run 1's geometry, with the cosine schedule allowed to finish.
+#
+# The one change under test: run 1 used `epochs: 30` with `early_stopping_patience: 8`, and
+# `_make_scheduler` sets `T_max = epochs`. A fold that stopped around epoch 20 therefore
+# selected its weights at roughly 65% of the peak learning rate and never saw the low-rate
+# endgame the cosine schedule exists to provide.
+#
+# WHY 20 EPOCHS AND NOT MORE. Raising `epochs` is the wrong lever and makes this worse: `T_max`
+# is tied to it, so a longer schedule decays more slowly and lands the same epoch at a HIGHER
+# rate. Shortening it is what completes the anneal. At `epochs: 20` the rate reaches ~7e-6 by
+# epoch 18 - a real convergence phase - against 7.5e-5 at epoch 20 of a 30-epoch schedule.
+#
+# WHY THIS COSTS ABOUT WHAT RUN 1 COST. Run 1's folds stopped near epoch 20, so it spent on the
+# order of 100 fold-epochs. This is 20 x 5 = 100 fold-epochs. Same night, annealed schedule.
+#
+# Early stopping is off (999). Nothing is risked by that: `train_fold` restores `best_state`,
+# the epoch with the lowest validation log loss, so training past the best epoch cannot make
+# the shipped weights worse. It only costs time, and at 20 epochs there is none to save.
+#
+# The geometry block is byte-identical to baseline.yaml, so:
+#   - the preprocessing cache is already warm - no resampling cost,
+#   - `data/interim/sbr_features.csv` stays valid (features come from the preprocessed volume,
+#     not the model), so `08_sbr_features.py` does NOT need re-running,
+#   - `11_compare_runs.py` gives a clean paired test against `baseline`.
+
+run_name: baseline_anneal
+seed: 42
+output_dir: models
+
+data:
+  # ---- byte-identical to baseline.yaml: keeps the cache warm and the comparison paired ----
+  root: data/raw
+  labels_csv: data/raw/train_labels.csv
+  nifti_dir: data/raw/niftis
+  folds_csv: data/interim/folds.csv
+  target_spacing_mm: [2.0, 2.0, 2.0]
+  target_shape: [96, 96, 96]
+  normalization: reference_region
+  crop: com
+  cache_dir: data/processed/cache
+  # ---------------------------------------------------------------------------------------
+
+model:
+  name: resnet3d
+  widths: [16, 32, 64, 128]
+  dropout: 0.3
+  in_channels: 1
+
+train:
+  epochs: 20                  # was 30; shortening completes the anneal
+  batch_size: 8
+  lr: 0.0003
+  weight_decay: 0.0001
+  scheduler: cosine
+  warmup_epochs: 2            # NOTE: dead knob - nothing reads it. See log.md, 2026-09-10.
+  amp: true
+  grad_clip: 1.0
+  early_stopping_patience: 999  # was 8; off, so the schedule runs to completion
+  num_workers: 4
+  fold_column: fold_strat
+  folds: [0, 1, 2, 3, 4]
+
+aug:
+  flip_lr: false
+  rotate_degrees: 10.0
+  translate_mm: 5.0
+  scale_range: [0.9, 1.1]
+  intensity_jitter: 0.1
+  noise_std: 0.01
+  mixup_alpha: 0.0

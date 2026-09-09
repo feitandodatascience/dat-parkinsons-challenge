@@ -23,6 +23,54 @@ from .utils.metrics import competition_logloss, summarize
 CLIP_GRID = (1e-6, 1e-4, 1e-3, 0.005, 0.01, 0.02, 0.05)
 
 
+def _schedule_section(run_dir: Path) -> list[str]:
+    """Summarise where each fold's training actually stopped, as report lines.
+
+    Aggregate over a fold's whole validation set, so this belongs in `reports/experiments/`
+    (CLAUDE.md §0.1) - epochs and learning rates describe the optimiser, not any scan.
+
+    It exists because the question "did early stopping cut the run short while there was still
+    something to gain?" was, for run 1, unanswerable: the curve lived only in a terminal that
+    had since been closed. `lr at best / peak` is the number that answers it. With
+    `T_max = cfg.train.epochs`, a fold that stops early selects its weights partway down the
+    cosine curve; a ratio near 1 means the anneal barely started, and the low-rate endgame the
+    schedule was written to provide never happened.
+    """
+    metrics_path = run_dir / "metrics.json"
+    if not metrics_path.exists():
+        return []
+    schedule = json.loads(metrics_path.read_text(encoding="utf-8")).get("schedule") or []
+    if not schedule:
+        return []
+
+    lines = [
+        "## Training schedule",
+        "",
+        "| fold | best epoch | last epoch | of | stopped early | lr at best / peak |",
+        "|---:|---:|---:|---:|---|---:|",
+    ]
+    for row in schedule:
+        lines.append(
+            f"| {row['fold']} | {row['best_epoch']} | {row['last_epoch']} | "
+            f"{row['epochs_configured']} | {'yes' if row['stopped_early'] else 'no'} | "
+            f"{row['lr_at_best_over_peak']:.2f} |"
+        )
+
+    stopped = [r for r in schedule if r["stopped_early"]]
+    if stopped:
+        worst = max(stopped, key=lambda r: r["lr_at_best_over_peak"])
+        lines += [
+            "",
+            f"- **{len(stopped)}/{len(schedule)} folds stopped early.** The worst selected its "
+            f"weights at **{worst['lr_at_best_over_peak']:.0%} of the peak learning rate**, so "
+            "the cosine anneal was still far from finished.",
+            "- Raising `epochs` does NOT fix this: `T_max` is tied to it, so a longer schedule "
+            "decays more slowly and lands the same epoch at a *higher* rate. The levers are a "
+            "**shorter** schedule or a larger `early_stopping_patience`.",
+        ]
+    return lines + [""]
+
+
 def evaluate_run(run_dir: Path, reports_dir: Path) -> dict[str, object]:
     """Score one training run's OOF predictions and pick a calibrator."""
     oof = pd.read_csv(run_dir / "oof.csv")
@@ -45,6 +93,9 @@ def evaluate_run(run_dir: Path, reports_dir: Path) -> dict[str, object]:
         f"- n = {base['n']}, positive rate = {base['positive_rate']:.3f}",
         f"- **prior baseline log loss = {base['baseline_logloss']:.4f}** (the floor to beat)",
         "",
+    ]
+    lines += _schedule_section(run_dir)
+    lines += [
         "## Uncalibrated",
         f"- log loss **{base['logloss']:.4f}**",
         f"- AUROC {base['auroc']:.4f}",

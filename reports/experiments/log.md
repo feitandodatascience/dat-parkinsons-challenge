@@ -67,6 +67,52 @@ platform, not the model. Every later CV↔LB gap is read against it.
 - [ ] Does `flip_lr` help or hurt? (Prior: hurts — asymmetry is diagnostic. Test it.)
 - [ ] Optimal prediction clip on OOF?
 - [ ] Is the CV↔leaderboard gap stable enough to trust CV for decisions?
+- [ ] **Did run 1's early stopping cut the cosine anneal short, and what did that cost?**
+      Unanswerable for run 1 — see below. Instrumented 2026-09-10; the next run answers it.
+
+### The run could not answer questions about itself (found and fixed 2026-09-10)
+
+Prompted by "should we retrain with more epochs — it stopped at 20 with the score still going
+up?" The honest answer was that **nobody could tell**, and that was the real problem.
+
+**What was checkable.** Selection and early stopping both run on validation log loss
+(`train.py`, `if metrics["logloss"] < best_loss`). So a fold that broke at 20 with
+`early_stopping_patience: 8` had its best epoch at 12 and got *worse* for eight consecutive
+epochs after it. Log loss cannot have been "still going up". The per-epoch line prints
+`val_logloss` and `auroc` side by side, and AUROC rising while log loss degrades is this file's
+opening rule — a model getting better at ranking while getting more overconfident.
+
+**What was not checkable, and is the more interesting half.** `_make_scheduler` sets
+`T_max = cfg.train.epochs = 30`. At `lr: 0.0003`, epoch 12 is still at **1.96e-4 — 65% of peak**.
+If run 1 stopped around 20, **the anneal never finished**, and the shipped weights were selected
+well before the low-rate endgame cosine exists to provide. That is a real cost and the instinct
+behind the question was sound.
+
+**Raising `epochs` is the wrong lever, and would make it worse.** `T_max` is tied to `epochs`, so
+a longer schedule decays *more slowly*: at `epochs: 50`, epoch 12 sits at ~2.6e-4. The levers are
+a shorter schedule or more patience.
+
+**None of this could be confirmed, because the curve existed only as stdout** and the terminal
+was long closed. `metrics.json` kept only each fold's best epoch. So:
+
+- `train_fold` now banks `history_fold<k>.json` every epoch — epoch, **lr**, train loss,
+  val log loss, AUROC, seconds — and carries it through the resume checkpoint.
+- `metrics.json` gains a `schedule` block per fold: best epoch, last epoch, whether it stopped
+  early, and **`lr_at_best_over_peak`**, which is the single number this question needs.
+- `04_evaluate.py` renders it as a **Training schedule** table in `reports/experiments/<run>.md`,
+  so it is visible without reading anything under `models/`.
+- `conf/highres.yaml` sets `early_stopping_patience: 999`. On a GPU a fold is minutes, so early
+  stopping buys nothing and costs the end of the schedule. `best_state` restoration means
+  training past the best epoch cannot make the shipped weights worse.
+
+**Incidental: `warmup_epochs` is dead.** Declared in `config.py`, set to 2 in every config, read
+by nothing — `_make_scheduler` returns a plain `CosineAnnealingLR`. Every run so far started at
+full learning rate from step one. It costs no score, but the configs describe a run that did not
+happen. Left as-is under the freeze; worth either implementing or deleting after the deadline.
+
+**The general lesson, which outlives this question:** an experiment that does not persist its own
+diagnostics can only be argued about, not settled. The cost was not the missing warmup — it was
+spending a session unable to answer a one-line question about a run that had already finished.
 
 ### Fold structure (2026-09-05, after the signature fix)
 

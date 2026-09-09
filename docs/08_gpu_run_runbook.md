@@ -102,6 +102,7 @@ so the cache key matches and the real run pays no resampling cost.
 
 - [ ] **Epoch 2 must be dramatically faster than epoch 1.** If it is not, the cache is not being
       hit. Stop and find out why — otherwise the real run pays the resampling cost five times.
+- [ ] Check the new `lr` column in the per-epoch line. It should start at `3.00e-04` and fall.
 - [ ] Note epoch 2's wall clock. Multiply by `30 epochs × 5 folds` for the real run's estimate.
       If that lands beyond ~10 hours, reconsider before committing.
 - [ ] This is a smoke test. **Never log a row from it.**
@@ -115,7 +116,19 @@ tail -f train_highres.log
 
 Use `nohup` (or `tmux`) — an SSH drop must not kill a paid run. Expect ~3–6 h.
 
-Produces `models/highres/`: `fold{0..4}.pt`, `oof_fold*.csv`, `oof.csv`, `metrics.json`.
+Produces `models/highres/`: `fold{0..4}.pt`, `oof_fold*.csv`, `oof.csv`, `metrics.json`, and
+`history_fold*.json` — the per-epoch curve, which run 1 did not keep.
+
+**Note `early_stopping_patience: 999` in `conf/highres.yaml`** — off by design. Early stopping
+saves CPU nights, and on an A100 a fold is minutes. What it costs is the end of the cosine
+schedule: `T_max = epochs`, so a fold that stops at 20 of 30 selects weights trained at a rate
+well above the annealed one. `train_fold` already restores the best-validation-log-loss epoch,
+so training past that point cannot make the shipped weights worse — it only costs GPU minutes.
+
+- [ ] After the run, read the **Training schedule** table that `04_evaluate.py` now writes into
+      `reports/experiments/highres.md`. `lr at best / peak` is the number to look at: near 1
+      means the anneal barely started and the schedule is worth revisiting; near 0 means it
+      finished and this question is closed.
 
 ## Step 6 — Everything else that needs the data, **while the box is still up**
 
