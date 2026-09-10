@@ -195,6 +195,33 @@ class TestTrainingHistory:
         assert any("Training schedule" in line for line in lines)
         assert any("lr at best / peak" in line for line in lines)
 
+    def test_schedule_section_survives_a_run_that_never_finished(
+        self, synthetic_project: dict
+    ) -> None:
+        """The case the per-epoch banking exists for, and the one it first failed on.
+
+        `run_cv` writes metrics.json only after the whole fold loop, so a run interrupted
+        mid-fold has every curve on disk and nothing to describe them. Reading the schedule out
+        of metrics.json therefore went blind exactly when the history mattered most - which is
+        what happened to `baseline_anneal`, whose fold 1 died four epochs in.
+        """
+        from datpd.evaluate import _schedule_section
+        from datpd.train import run
+
+        cfg = _config(synthetic_project)
+        run(cfg)
+        run_dir = Path(cfg.output_dir) / cfg.run_name
+
+        (run_dir / "metrics.json").unlink()
+        assert (run_dir / "history_fold0.json").exists(), "the curve must outlive metrics.json"
+
+        lines = _schedule_section(run_dir)
+        assert any("Training schedule" in line for line in lines), "went blind without config"
+        # Unknowable without the config, and reported as unknown rather than guessed.
+        assert any("| ? | ? |" in line for line in lines)
+        # A single-fold run must say so: its numbers are not a five-fold OOF.
+        assert any("Only fold 0 trained" in line for line in lines)
+
     def test_the_cache_is_written_and_reused(self, synthetic_project: dict) -> None:
         """Second construction must hit the cache rather than re-resampling every volume."""
         from datpd.data.dataset import DaTScanDataset

@@ -114,6 +114,42 @@ happen. Left as-is under the freeze; worth either implementing or deleting after
 diagnostics can only be argued about, not settled. The cost was not the missing warmup — it was
 spending a session unable to answer a one-line question about a run that had already finished.
 
+### The anneal hypothesis looks wrong, on one fold (2026-09-10)
+
+`baseline_anneal` (96³, `epochs: 20`, early stopping off) was started and **did not finish**:
+fold 0 completed all 20 epochs, **fold 1 died four epochs in**, folds 2–4 never ran. So its
+report is n=273 — one fold's validation set — and **its 0.3203 is not comparable to run 1's
+0.3186** over 1362. SE at n=273 is around ±0.04. Nothing about better-or-worse is readable.
+
+What fold 0 *does* say, and it is the point of the experiment:
+
+| | best epoch | of | lr at best / peak |
+|---|---:|---:|---:|
+| run 1 (`T_max=30`, patience 8) | ~12 (inferred) | 30 | ~0.65 |
+| `baseline_anneal` (`T_max=20`, no early stop) | **11** | 20 | **0.42** |
+
+**The anneal ran to zero and the low-rate endgame made things worse.** Epochs 12–19 — exactly the
+phase the shortened schedule was built to deliver — all scored worse than epoch 11. The model
+peaks at epoch 11–12 *regardless of the learning-rate schedule*, which means the binding
+constraint is **overfitting, not an unfinished anneal**, and `best_state` selection was already
+handling it. Run 1's early stopping at ~20/30 was doing the right thing.
+
+One fold is weak evidence and this is not yet closed. But the prior has moved from "the anneal
+cost us something" to "it did not", and the remaining ~76 fold-epochs would most likely buy a
+confirmed null. Worth finishing only if no GPU appears; 128³ at −0.02 to −0.05 dominates it.
+
+**A defect in yesterday's instrumentation, found by this run.** `_schedule_section` read the
+`schedule` block out of `metrics.json` — which `run_cv` writes only *after* the whole fold loop.
+An interrupted run therefore had every `history_fold*.json` safely on disk and no table in the
+report: the reporting went blind in precisely the case the per-epoch banking existed for. Now it
+reads the history files directly, computes the peak rate from `history[0]["lr"]` (recorded before
+the first `scheduler.step()`, so it *is* `cfg.train.lr`), and marks the schedule length `?` when
+the config was never written. `tests/test_train_smoke.py` pins the partial-run case.
+
+Lesson, and it is the same one twice in two days: **the diagnostic has to survive the failure it
+is meant to diagnose.** Banking the curve every epoch was right; putting the report behind a file
+that only exists on success undid it.
+
 ### Fold structure (2026-09-05, after the signature fix)
 
 21 acquisition groups over n=1362. Stratified folds are 272-273 each at 54.8-54.9% positive.

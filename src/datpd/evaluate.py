@@ -35,13 +35,32 @@ def _schedule_section(run_dir: Path) -> list[str]:
     `T_max = cfg.train.epochs`, a fold that stops early selects its weights partway down the
     cosine curve; a ratio near 1 means the anneal barely started, and the low-rate endgame the
     schedule was written to provide never happened.
+
+    Read from `history_fold*.json`, NOT from `metrics.json`'s schedule block. `run_cv` writes
+    metrics.json only after the whole fold loop, so an interrupted run - the case the per-epoch
+    banking exists for - has every curve on disk and no metrics.json to describe them. Reading
+    the history files directly means this table appears for a partial run too.
+
+    `history[0]["lr"]` is the configured peak: `train_fold` records the rate before stepping the
+    scheduler, so epoch 0 carries `cfg.train.lr` exactly. That makes the ratio computable
+    without the config, which a partial run may not have written.
     """
+    histories: list[tuple[int, list[dict[str, float]]]] = []
+    for path in sorted(run_dir.glob("history_fold*.json")):
+        rows = json.loads(path.read_text(encoding="utf-8"))
+        if rows:
+            histories.append((int(path.stem.removeprefix("history_fold")), rows))
+    if not histories:
+        return []
+
+    # Only needed to say whether a fold stopped short of its schedule; absent on a partial run.
+    epochs_configured: int | None = None
     metrics_path = run_dir / "metrics.json"
-    if not metrics_path.exists():
-        return []
-    schedule = json.loads(metrics_path.read_text(encoding="utf-8")).get("schedule") or []
-    if not schedule:
-        return []
+    if metrics_path.exists():
+        cfg_block = json.loads(metrics_path.read_text(encoding="utf-8")).get("config") or {}
+        configured = (cfg_block.get("train") or {}).get("epochs")
+        if isinstance(configured, int):
+            epochs_configured = configured
 
     lines = [
         "## Training schedule",
@@ -49,21 +68,38 @@ def _schedule_section(run_dir: Path) -> list[str]:
         "| fold | best epoch | last epoch | of | stopped early | lr at best / peak |",
         "|---:|---:|---:|---:|---|---:|",
     ]
-    for row in schedule:
+    stopped: list[tuple[int, float]] = []
+    for fold, rows in histories:
+        best = min(rows, key=lambda h: h["val_logloss"])
+        ratio = best["lr"] / rows[0]["lr"] if rows[0]["lr"] else 0.0
+        last_epoch = rows[-1]["epoch"]
+        if epochs_configured is None:
+            of, early = "?", "?"
+        else:
+            of = str(epochs_configured)
+            early = "yes" if last_epoch + 1 < epochs_configured else "no"
+            if early == "yes":
+                stopped.append((fold, ratio))
         lines.append(
-            f"| {row['fold']} | {row['best_epoch']} | {row['last_epoch']} | "
-            f"{row['epochs_configured']} | {'yes' if row['stopped_early'] else 'no'} | "
-            f"{row['lr_at_best_over_peak']:.2f} |"
+            f"| {fold} | {best['epoch']} | {last_epoch} | {of} | {early} | {ratio:.2f} |"
         )
 
-    stopped = [r for r in schedule if r["stopped_early"]]
-    if stopped:
-        worst = max(stopped, key=lambda r: r["lr_at_best_over_peak"])
+    if len(histories) > 1:
+        lines += ["", f"- {len(histories)} folds trained."]
+    else:
+        (fold, _), = histories
         lines += [
             "",
-            f"- **{len(stopped)}/{len(schedule)} folds stopped early.** The worst selected its "
-            f"weights at **{worst['lr_at_best_over_peak']:.0%} of the peak learning rate**, so "
-            "the cosine anneal was still far from finished.",
+            f"- **Only fold {fold} trained.** Every number in this report is that fold's "
+            "validation set alone, not a five-fold OOF, and is not comparable to a full run.",
+        ]
+
+    if stopped:
+        worst_fold, worst_ratio = max(stopped, key=lambda fr: fr[1])
+        lines += [
+            f"- **{len(stopped)}/{len(histories)} folds stopped early.** The worst (fold "
+            f"{worst_fold}) selected its weights at **{worst_ratio:.0%} of the peak learning "
+            "rate**, so the cosine anneal was still far from finished.",
             "- Raising `epochs` does NOT fix this: `T_max` is tied to it, so a longer schedule "
             "decays more slowly and lands the same epoch at a *higher* rate. The levers are a "
             "**shorter** schedule or a larger `early_stopping_patience`.",
