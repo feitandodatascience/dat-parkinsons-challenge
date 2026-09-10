@@ -20,6 +20,7 @@ Rules for this file:
 | 2 | 2026-09-08 | — | | **per-family error decomposition** (`06_score_by_group.py`), no training | — | — | — | — | — | n/a | measurement, not a model. Leave-one-family-out temperature transfer penalty **+0.0006**; per-centre oracle prior correction worth at most **0.004**. Closes row 0b |
 | 3 | 2026-09-08 | `baseline.yaml` | | **TTA**, 9 laterality-preserving views on the run-1 checkpoints | **0.3164** | — | 0.9306 | 0.0269 | not submitted | marginal | gain **−0.0022**, temperature falls to 1.2457. AUROC +0.0004, so the gain is variance reduction, not ranking. Same order as the CV↔LB gap |
 | 4 | 2026-09-08 | `baseline.yaml` | | **SBR features + gradient boosting, stacked onto the CNN** | **0.3048** | — | — | — | not submitted | **yes** | gain **−0.0175**, cross-validated. Trees alone 0.3919 / AUROC 0.9046; logit correlation 0.797. Largest measured gain in the project |
+| 6 | 2026-09-11 | `baseline_anneal.yaml` | | **completed cosine anneal**: 20 epochs, early stopping off, run 1's geometry | **0.3294** | — | 0.9252 | 0.0194 | not submitted | **no** | paired vs baseline: **+0.00765, 1.2σ**, CI [−0.0048, +0.0200], only 45.5% of scans improved. A null that leans negative. Closes the schedule question — see the note below the table |
 | 5 | 2026-09-09 | `baseline.yaml` | | **TTA + SBR blend, packaged** (lightgbm, 5 boosters, logistic stack) | **0.3061** | — | 0.9375 | — | **0.2973** | **yes — shipped** | paired vs baseline: **−0.01562, 3.1σ**, CI [−0.0255, −0.0057], 63.4% of scans improved. Stack: intercept 0.0236, CNN 0.6164, trees 0.3779. No temperature — the stack carries it. **LB AUROC 0.9396, rank #98/897, 15 min of a 3 h budget, zero filtered log lines.** Full log: `reports/submissions/002_2026-09-09_tta_blend.md` |
 
 **Run 1 packaged 2026-09-08**: `submission.zip`, 37.9 MB, 5 fold checkpoints ensembled in logit
@@ -114,7 +115,52 @@ happen. Left as-is under the freeze; worth either implementing or deleting after
 diagnostics can only be argued about, not settled. The cost was not the missing warmup — it was
 spending a session unable to answer a one-line question about a run that had already finished.
 
-### The anneal hypothesis looks wrong, on one fold (2026-09-10)
+### The schedule question, closed on five folds (2026-09-11)
+
+`baseline_anneal` finished. **OOF 0.3294 against baseline's 0.3217** on the same cross-validated
+temperature, and `11_compare_runs.py` puts the paired difference at **+0.00765, 1.2σ**, CI
+[−0.0048, +0.0200], with **45.5% of scans improved** — below half. **No detectable difference,
+point estimate favouring run 1. Not shipped.** Row 6.
+
+The schedule table is the part worth keeping:
+
+| fold | best epoch | of | lr at best / peak |
+|---:|---:|---:|---:|
+| 0 | 11 | 20 | 0.42 |
+| 1 | **17** | 20 | **0.05** |
+| 2 | 11 | 20 | 0.42 |
+| 3 | 10 | 20 | 0.50 |
+| 4 | **15** | 20 | **0.15** |
+
+**This corrects what the single fold appeared to say.** Yesterday, on fold 0 alone, the reading
+was "the model peaks at epoch 11-12 regardless of the schedule, and the low-rate endgame makes
+things worse". Five folds say that was too strong: **folds 1 and 4 peaked at epochs 17 and 15, at
+5% and 15% of peak rate** — deep in the anneal, exactly where the hypothesis predicted gains. The
+endgame does help, on some folds.
+
+It just does not help *on balance*, and the mechanism is visible in the same table. Shortening
+`T_max` from 30 to 20 buys a completed anneal but pays for it with a systematically lower rate at
+every epoch: at epoch 11, `T_max=20` gives 1.27e-4 where `T_max=30` gives 2.05e-4. The extra
+learning-rate heat in the longer schedule was doing real work. The two effects roughly cancel,
+which is what a 1.2σ null looks like from the inside.
+
+**Consequence for `conf/highres.yaml`, which is unchanged and correct.** It keeps `epochs: 30` —
+run 1's exact LR trajectory — and only turns early stopping off (`patience: 999`). That is the
+right combination and this experiment supports it rather than undermining it: `best_state`
+restoration means the extra epochs cannot make the shipped weights worse, they cost GPU minutes,
+and folds 1 and 4 are the evidence that a late minimum is sometimes there to be caught. What does
+*not* work is shortening `T_max`. Do not do that at 128³.
+
+**`flip_lr` and the schedule are now both settled enough to stop.** The remaining nights should go
+to 128³ or to Phase 4, not to another schedule variant.
+
+### What the same run looked like at one fold, and why that was premature (2026-09-10)
+
+> **Superseded by the five-fold result above.** Kept because the error is instructive: the
+> conclusion drawn below from fold 0 — "the model peaks at epoch 11-12 regardless of the
+> schedule" — was contradicted by folds 1 and 4, which peaked at 17 and 15. The *verdict* it
+> reached (a null, don't ship) happened to survive; the *reasoning* did not. One fold out of five
+> is a 20% sample, and reading a mechanism off it was overreach even with the direction right.
 
 `baseline_anneal` (96³, `epochs: 20`, early stopping off) was started and **did not finish**:
 fold 0 completed all 20 epochs, **fold 1 died four epochs in**, folds 2–4 never ran. So its
