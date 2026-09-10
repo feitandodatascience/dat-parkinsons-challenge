@@ -291,9 +291,20 @@ def main() -> None:
             p = predict_one(models, uid) if models else FALLBACK_PROB
         except Exception as exc:  # noqa: BLE001 - never crash the whole run for one scan
             failures += 1
-            # Exception TYPE only, and no row index: the message could carry data-derived
-            # values, and the index would disclose the test set's size.
-            if failures <= 5:
+            # Exactly ONE line, on the first failure only.
+            #
+            # This used to log for `failures <= 5`, which meant the NUMBER OF TIMES the line
+            # appeared was a lower bound on how many test scans failed - a count derived from
+            # the test data, which is the category that drew the 2026-09-08 disqualification
+            # warning. `check_logging` does not catch it: it scans for `len(...)` and row
+            # indices, and multiplicity is neither. Nor had the platform ever exercised this
+            # branch, since the 0.2973 run needed no fallbacks - so the only untested logging
+            # path was the one that fires when something goes wrong on the final submission.
+            #
+            # Exception TYPE only, never the message, which could carry data-derived values.
+            # The diagnostic value is in knowing *what* failed, not how often; the summary
+            # line below already reports whether-not-how-many.
+            if failures == 1:
                 logger.warning(f"Prediction failed ({type(exc).__name__}); using fallback")
             p = FALLBACK_PROB
         predictions.append(p)

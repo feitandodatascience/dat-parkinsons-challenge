@@ -45,6 +45,26 @@ class TestShippedEntryPoint:
                 continue
             assert "len(submission" not in stripped, f"logs the test set size: {stripped}"
 
+    def test_the_failure_warning_is_emitted_at_most_once(self) -> None:
+        """A line logged once per failure discloses a count by how often it appears.
+
+        Found by the 2026-09-11 line-by-line audit. The guard was `failures <= 5`, so up to
+        five identical warnings would appear and their multiplicity was a lower bound on how
+        many test scans failed - the same category of disclosure as `len(submission)`, which
+        drew a disqualification warning. `check_logging` cannot see it: it scans for `len(...)`
+        and row indices, and this is neither.
+
+        The branch had also never run on the platform - the 0.2973 submission needed no
+        fallbacks - so it was the one logging path with no real-world evidence behind it.
+        """
+        text = MAIN_PY.read_text(encoding="utf-8")
+
+        # The counter may gate a log line only on its FIRST increment. Any inequality would
+        # let the line repeat, and the repetition is the disclosure.
+        assert "if failures == 1:" in text, "the failure warning must fire on the first only"
+        for bad in ("if failures <= ", "if failures < ", "if failures >= ", "if failures > "):
+            assert bad not in text, f"{bad!r} lets the warning repeat and leak a count"
+
 
 class TestScanner:
     @pytest.mark.parametrize(
