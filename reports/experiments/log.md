@@ -20,8 +20,12 @@ Rules for this file:
 | 2 | 2026-09-08 | — | | **per-family error decomposition** (`06_score_by_group.py`), no training | — | — | — | — | — | n/a | measurement, not a model. Leave-one-family-out temperature transfer penalty **+0.0006**; per-centre oracle prior correction worth at most **0.004**. Closes row 0b |
 | 3 | 2026-09-08 | `baseline.yaml` | | **TTA**, 9 laterality-preserving views on the run-1 checkpoints | **0.3164** | — | 0.9306 | 0.0269 | not submitted | marginal | gain **−0.0022**, temperature falls to 1.2457. AUROC +0.0004, so the gain is variance reduction, not ranking. Same order as the CV↔LB gap |
 | 4 | 2026-09-08 | `baseline.yaml` | | **SBR features + gradient boosting, stacked onto the CNN** | **0.3048** | — | — | — | not submitted | **yes** | gain **−0.0175**, cross-validated. Trees alone 0.3919 / AUROC 0.9046; logit correlation 0.797. Largest measured gain in the project |
+| 7 | 2026-09-11 | — | | **ensemble of runs 1 + 6**, logit-averaged (`12_ensemble_runs.py`), no training | **0.3194** | — | 0.9287 | — | not submitted | **no** | paired vs baseline: **−0.00234, 0.7σ**, CI [−0.0085, +0.0038], 58.1% improved. ρ = 0.9740, and the (1−ρ) heuristic predicted −0.0022 before measuring. Half the raw gain was calibration. Closes the last cheap lever |
 | 6 | 2026-09-11 | `baseline_anneal.yaml` | | **completed cosine anneal**: 20 epochs, early stopping off, run 1's geometry | **0.3294** | — | 0.9252 | 0.0194 | not submitted | **no** | paired vs baseline: **+0.00765, 1.2σ**, CI [−0.0048, +0.0200], only 45.5% of scans improved. A null that leans negative. Closes the schedule question — see the note below the table |
 | 5 | 2026-09-09 | `baseline.yaml` | | **TTA + SBR blend, packaged** (lightgbm, 5 boosters, logistic stack) | **0.3061** | — | 0.9375 | — | **0.2973** | **yes — shipped** | paired vs baseline: **−0.01562, 3.1σ**, CI [−0.0255, −0.0057], 63.4% of scans improved. Stack: intercept 0.0236, CNN 0.6164, trees 0.3779. No temperature — the stack carries it. **LB AUROC 0.9396, rank #98/897, 15 min of a 3 h budget, zero filtered log lines.** Full log: `reports/submissions/002_2026-09-09_tta_blend.md` |
+| 8 | 2026-09-15 | `timing_probe.yaml` | | **measured R** - one fold, one epoch, warm cache, run 1's settings | - | - | - | - | - | n/a | **399 s per fold-epoch, so R = 16.6 h, not the ~48 h every plan assumed.** A measurement, not a model. Reopened the retrain docs/05 had ruled unaffordable, and closed 128 cubed (39.4 h) on evidence rather than on a guess |
+| 9 | 2026-09-16 | `baseline.yaml` | | **SBR features repaired + extended (61 -> 157), booster tuned**, on run 1's TTA predictions | **0.2929** | - | - | - | **0.2935** | **yes - shipped** | vs the shipped stack's 0.3038 under the identical procedure: **-0.0109**. Splits into -0.0066 (features) and -0.0043 (tuning; 2.1 sigma, CI [-0.0083, -0.0002]). Trees alone 0.3920 -> **0.3659**; rho rose 0.798 -> 0.825, so the gain is tree quality, not diversity. Tuning is **nested** (inner 3-fold inside each outer fold), so the figure is not optimistic on that count. Bagging x5 helped the default booster (-0.0017) but **hurt the tuned one** (0.2929 -> 0.2931). Ablation on a 61-column subset reproduces 0.3038 exactly, and tuning there is worth -0.0005 at 0.5 sigma - **tuning only pays on the repaired features**, so the whole gain traces to the feature work. **LB 0.2973 -> 0.2935 (-0.0038)** against -0.0109 on CV; 15 min on the platform, 5+5 assets loaded, no fallbacks, zero filtered lines |
+| 10 | 2026-09-16 | `aug_rich.yaml` | | **richer augmentation retrain** (elastic, PSF blur, signed gamma, count noise, mixup) ensembled with run 1, both with 9-view TTA, + 157-feature trees | **0.2841** | - | 0.9455 | - | packaged | **yes** | aug_rich ALONE is worse: OOF 0.3358 vs run 1's 0.3271 uncalibrated, though ECE 0.0264 vs 0.0404 (mixup calibrates). But **rho = 0.9135** vs 0.974 for a same-recipe second run, and the CNN ensemble is -0.0153 (2.9 sigma, AUROC +0.0087) calibrated. Full stack vs candidate A, both re-calibrated: **-0.0101, 2.4 sigma, CI [-0.0185, -0.0017]**, 60.1% improved. Tuning NOT promoted on this stack (-0.0020, 1.3 sigma). Every fold peaked at epochs 15-21 of 30, so early stopping off was right. The augmentation did not make a better model; it made a usefully different one |
 
 **Run 1 packaged 2026-09-08**: `submission.zip`, 37.9 MB, 5 fold checkpoints ensembled in logit
 space. All pre-flight checks passed, including the new one that loads every shipped checkpoint
@@ -114,6 +118,92 @@ happen. Left as-is under the freeze; worth either implementing or deleting after
 **The general lesson, which outlives this question:** an experiment that does not persist its own
 diagnostics can only be argued about, not settled. The cost was not the missing warmup — it was
 spending a session unable to answer a one-line question about a run that had already finished.
+
+### The blank that was load-bearing (2026-09-15)
+
+`docs/05` defines R = wall-clock for one full 5-fold run, then says **`R = ______ hours` <- fill
+this in; every row below is priced in it.** Nobody did. `docs/03` guessed ~48 h, `docs/07` then
+back-derived "2.4 R ~ 115 CPU-hours" from that guess, and *"a retrain is unaffordable on CPU"*
+propagated from there into the Phase 3 ranking, into the next-session brief, and into the decision
+not to test augmentation at all.
+
+Measured on the first attempt with `conf/timing_probe.yaml`: **399 s per fold-epoch**, so
+**R = 16.6 h**. The placeholder was wrong by 3x, in the direction that closed off the largest
+remaining lever. The probe costs seven minutes and would have settled it on day one.
+
+The generalisable part is the same lesson as "the run could not answer questions about itself",
+one level up: **run 1 had this information and discarded it.** It knew its own epoch time, so the
+number had to be guessed, and the guess then did real damage - not by being wrong, but by being
+wrong *and never checked* while decisions were priced in it. A number nobody can reproduce is a
+number nobody will question.
+
+| | at R = 48 h (assumed) | at R = 16.6 h (measured) |
+|---|---|---|
+| Retrain at 96 cubed | unaffordable | **16.6 h - fits** |
+| 128 cubed @ 1.5 mm | 115 h, absurd | 39.4 h - **still does not fit**, but now on a measurement |
+| Second seed | unaffordable | affordable, still not worth it (rho = 0.974 predicts -0.002) |
+
+So this file's headline conclusion survives. It was resting on a number three times too large, and
+the experiment it ruled out had been affordable the whole time.
+
+### Where the feature gain came from (2026-09-16)
+
+`reports/experiments/sbr_features.md` showed three features with impossible distributions:
+`box_to_shell` (std **147**), `box_to_global` (std **88**), `box_peak_to_shell` (std **1109**), all
+sign-flipping, p05 -23 / p50 -2.6 / p95 -0.70. The cause: `reference_region` normalisation leaves
+the volume roughly zero-centred, so each of these ratios has a denominator that crosses zero.
+
+**A ratio that flips sign as its denominator crosses zero is not monotone in the contrast it is
+meant to express.** Gradient boosting is invariant to monotone transforms but not to that, so
+three of 61 features were scrambled rather than merely oddly scaled - and the distributions had
+been sitting in a report Claude was allowed to read since 2026-09-08.
+
+They were repaired by *addition*, not replacement: the originals keep their values, so nothing
+already fitted on them changes meaning, and well-behaved counterparts sit beside them - differences
+in already-normalised units, and ratios against a strictly positive robust scale.
+
+An unresolved caveat, recorded rather than buried: the -0.0109 splits into a features half and a
+tuning half, and **only the tuning half has a paired standard error.** The features half compares
+two runs of the same procedure over different feature tables, and the 61-column table was
+overwritten by the 157-column one. Re-running the blend against a 61-column subset would give it a
+sigma. It is bookkeeping rather than a ship decision - the configuration that ships is chosen on
+the cross-validated number either way - but the asymmetry should not be read past.
+
+### The last cheap lever, measured and not shipped (2026-09-11)
+
+Ensembling run 1's checkpoints with `baseline_anneal`'s, at the OOF level, via
+`scripts/12_ensemble_runs.py`. **The training was already sunk** — both `oof.csv` were on disk —
+so this cost seconds rather than the CPU hour a TTA pass would have needed first. That ordering
+is the point: test the free version of an idea before paying for the expensive one.
+
+| | OOF log loss | AUROC |
+|---|---:|---:|
+| baseline | 0.3217 | 0.9278 |
+| baseline + baseline_anneal | **0.3194** | 0.9287 |
+
+**Paired: −0.00234 at 0.7σ**, CI [−0.00851, +0.00377], 58.1% of scans improved. Direction right,
+interval crosses zero. **Not shipped.**
+
+**Half the apparent gain was calibration.** Uncalibrated the ensemble looked like −0.00509;
+recalibrated on both sides it is −0.00234. Averaging logits softens them and a temperature refit
+absorbs the difference — the §4.3 trap in a new costume. `11_compare_runs.py` cross-validates a
+temperature on both sides, which is the only reason this was visible.
+
+**The correlation argument predicted it almost exactly, and that is the durable result.**
+ρ = 0.9740 between the two runs' logits. Against the tree model's −0.0175 at ρ = 0.797, scaling
+by (1−ρ) gives −0.0175 × 0.026/0.203 = **−0.0022** predicted, against −0.00234 measured. So the
+heuristic used to reject a second CNN architecture without spending a night on it now has a
+direct empirical check behind it. **Two models of the same architecture on the same folds do not
+carry enough independent information to matter, and the correlation says so in advance.**
+
+Why not ship a −0.002 point estimate in the right direction: the anneal TTA pass (1 h) is still
+unrun, `STACK_COEF_CNN = 0.6164` was fitted on `baseline_tta`'s logit distribution and would need
+refitting, both runs name their checkpoints `fold0..fold4` so staging ten needs a manual rename,
+and it all requires a repackage plus a fresh Docker timing test — against a build already banked
+at **0.2973** with zero filtered log lines. Expected upside −0.002; downside a botched repackage
+in the last three days.
+
+**This closes the last CPU-feasible lever.** Everything remaining is Phase 4.
 
 ### The schedule question, closed on five folds (2026-09-11)
 

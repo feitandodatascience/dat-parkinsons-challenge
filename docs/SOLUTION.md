@@ -279,6 +279,20 @@ If compute had allowed one architecture, the better choice would have been the *
 with the 3D CNN would sit nearer the tree model's 0.797, which is where ensemble value lives. It
 also carries no PPMI provenance problem (§6.2).
 
+**That reasoning was then checked empirically, and it held.** Ensembling run 1's checkpoints with
+the `baseline_anneal` run's — two models of the same architecture on the same folds, differing
+only in learning-rate schedule — gives ρ = **0.9740**. Scaling the tree model's −0.0175 by
+(1−ρ) predicts **−0.0022**; the measured paired difference is **−0.00234 at 0.7σ**, CI
+[−0.0085, +0.0038]. So the heuristic used to reject a second architecture without spending a
+training run on it now has a direct check behind it, on this data, with the prediction made in
+advance.
+
+Not shipped: a −0.002 point estimate whose interval crosses zero, against a repackage requiring
+a stack refit (the fitted `STACK_COEF_CNN` belongs to a different logit distribution), a manual
+checkpoint rename, and a fresh timing test — with a validated 0.2973 build already banked.
+`scripts/12_ensemble_runs.py` does this comparison at the OOF level in seconds, before any
+inference-path work, which is why it cost nothing to find out.
+
 ### 5.3 Completing the cosine anneal
 
 Early stopping (patience 8) with `T_max = 30` meant a fold stopping near epoch 20 selected weights
@@ -390,3 +404,7 @@ negative results. Per-submission platform logs are in `reports/submissions/`.
    was a single point, and a single point has no spread.
 5. **Look for diversity, not capacity.** The tree model is much worse than the CNN and is the
    largest single gain in the solution. That generalises further than anything else here.
+6. **Test the free version of an idea before paying for the expensive one.** The two-run ensemble
+   (§5.2) was answerable in seconds from OOF files already on disk, and the answer made a CPU
+   hour and a repackage unnecessary. The reflex to reach for the full experiment first is what
+   the compute budget could least afford.

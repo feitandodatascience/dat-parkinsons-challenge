@@ -40,12 +40,8 @@
 
 ## To ship this
 
-```bash
-python scripts/05_package_submission.py \
-    --config conf/<the config these weights were trained with> \
-    --temperature 1.2457 \
-    --fallback 0.5485 \
-    --clip-eps 1e-06
+```
+python scripts/05_package_submission.py --config conf/<the config these weights were trained with> --temperature 1.2457 --fallback 0.5485 --clip-eps 1e-06
 ```
 
 Copy the fold checkpoints into `submission_src/assets/` first.
