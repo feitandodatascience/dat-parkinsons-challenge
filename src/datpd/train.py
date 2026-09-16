@@ -24,6 +24,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
+from .augment import wrap_if_enabled
 from .config import Config
 from .data.dataset import DaTScanDataset
 from .models.factory import build_model
@@ -74,6 +75,13 @@ def train_fold(
 
     train_ds = DaTScanDataset(train_df, cfg.data, cfg.aug, train=True)
     val_ds = DaTScanDataset(val_df, cfg.data, cfg.aug, train=False)
+
+    # Training only, and never the validation split: the extra augmentation exists to regularise
+    # the fit, and a perturbed validation set would measure a different quantity than every
+    # other row in the experiment log. Returns `train_ds` unchanged unless a config switches one
+    # of the rich augmentations on, so existing runs are bit-for-bit unaffected.
+    # The fold enters the seed so the five folds do not all draw the same perturbation stream.
+    train_ds = wrap_if_enabled(train_ds, cfg.aug, seed=cfg.seed + 1000 * (fold + 1))
 
     # Pinned memory only helps when there is a device to copy to asynchronously; on CPU it is
     # pure overhead and torch warns once per loader, which buries the loss curve in a long run.

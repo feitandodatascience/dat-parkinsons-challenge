@@ -20,11 +20,29 @@ Let **R = wall-clock hours for one full 5-fold CV run of `conf/baseline.yaml`** 
 30 epochs, this machine). Run 1 is exactly that, so R is already known — from the run's start and
 end times, not from an estimate.
 
-> **R = ______ hours** ← fill this in; every row below is priced in it.
-> [03_plan.md](03_plan.md) guessed ~48 h. If the preprocessing cache was cold for run 1 and is
-> warm now, the true figure for a *repeat* run at the same geometry is lower, possibly much
-> lower — `conf/grouped_cv.yaml` uses byte-identical preprocessing settings, so it reuses the
-> cache in `data/processed/cache` and pays no resampling cost at all.
+> **R = 16.6 hours.** Measured 2026-09-15, not estimated: `conf/timing_probe.yaml` trains fold 0
+> for exactly one epoch at run 1's settings, against the warm cache, and reports **399 s**.
+> Five folds x 30 epochs = 150 fold-epochs x 399 s = 16.6 h.
+>
+> **This blank was load-bearing, and the placeholder was wrong by 3x.** [03_plan.md](03_plan.md)
+> guessed ~48 h; [07_cloud_compute_compliance.md](07_cloud_compute_compliance.md) then back-derived
+> "2.4 R ~ 115 CPU-hours" from that guess, and from there "a retrain is unaffordable on CPU"
+> propagated into every Phase 3 decision and into the next-session brief. It was never checked
+> against a clock, because the one run that could have answered it did not persist its own
+> timings — the same failure recorded in the experiment log under "the run could not answer
+> questions about itself". A one-epoch probe costs 7 minutes and would have settled it on day one.
+>
+> What it changes, on 2026-09-15 with ~31 h left:
+>
+> | | at R = 48 h (assumed) | at R = 16.6 h (measured) |
+> |---|---|---|
+> | Retrain at 96 cubed | unaffordable | **16.6 h — fits** |
+> | 128 cubed @ 1.5 mm (2.37x voxels) | 115 h, absurd | 39.4 h — **still does not fit**, but now closed on a measurement |
+> | Second seed for ensembling | unaffordable | affordable, and still not worth it: rho = 0.974 predicts -0.002 |
+>
+> So the headline conclusion of this file survives — higher resolution is out of reach — but for
+> a reason three times weaker than the one written down, and the retrain it ruled out was
+> affordable all along.
 
 Costs below are derived from training work, counted as *scan-epochs* (samples pushed through
 forward+backward). Across any 5-fold CV the total is 4n = 5448 scan-epochs per epoch of

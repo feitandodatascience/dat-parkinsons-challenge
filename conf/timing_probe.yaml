@@ -1,0 +1,57 @@
+# Not an experiment. A stopwatch.
+#
+# docs/05 prices every Phase 3 decision in R = wall-clock hours for one full 5-fold run of
+# baseline.yaml, and R was never filled in — docs/07 back-derives it as ~48 CPU-hours from a
+# "2.4 R ~ 115 CPU-hours" remark. Every "we cannot afford to retrain" conclusion in this project
+# rests on that one un-measured number, and on 2026-09-15 it is the number deciding whether a
+# new augmentation recipe can be tested at all before the deadline.
+#
+# So measure it: ONE fold, ONE epoch. Byte-identical data settings to baseline.yaml, so the
+# preprocessing cache built by run 1 is reused and this times COMPUTE rather than cache
+# construction. Multiply the reported epoch seconds by 150 (5 folds x 30 epochs) for R.
+#
+# Delete after the deadline. It exists to answer one question.
+
+run_name: timing_probe
+seed: 42
+output_dir: models
+
+data:
+  root: data/raw
+  labels_csv: data/raw/train_labels.csv
+  nifti_dir: data/raw/niftis
+  folds_csv: data/interim/folds.csv
+  target_spacing_mm: [2.0, 2.0, 2.0]
+  target_shape: [96, 96, 96]
+  normalization: reference_region
+  crop: com
+  cache_dir: data/processed/cache
+
+model:
+  name: resnet3d
+  widths: [16, 32, 64, 128]
+  dropout: 0.3
+  in_channels: 1
+
+train:
+  epochs: 1
+  batch_size: 8
+  lr: 0.0003
+  weight_decay: 0.0001
+  scheduler: cosine
+  warmup_epochs: 2
+  amp: true
+  grad_clip: 1.0
+  early_stopping_patience: 999
+  num_workers: 4
+  fold_column: fold_strat
+  folds: [0]
+
+aug:
+  flip_lr: false
+  rotate_degrees: 10.0
+  translate_mm: 5.0
+  scale_range: [0.9, 1.1]
+  intensity_jitter: 0.1
+  noise_std: 0.01
+  mixup_alpha: 0.0

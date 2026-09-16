@@ -77,7 +77,24 @@ class AugConfig:
     scale_range: tuple[float, float] = (0.9, 1.1)
     intensity_jitter: float = 0.1
     noise_std: float = 0.01
+
+    # Implemented in `datpd.augment` and applied by a wrapper around the training dataset.
+    # Every one defaults to OFF, so a config that does not mention them describes exactly the
+    # run it described before these existed — which is what keeps the rows already in
+    # `reports/experiments/log.md` comparable with anything trained from here on.
+    #
+    # `mixup_alpha` is the exception to "new": it has been declared here since the first commit
+    # and was read by nothing, the same way `warmup_epochs` still is. It now does something.
     mixup_alpha: float = 0.0
+    mixup_prob: float = 0.5
+    elastic_alpha: float = 0.0
+    blur_sigma_max: float = 0.0
+    gamma_range: tuple[float, float] = (1.0, 1.0)
+    count_noise: float = 0.0
+    # Probability that each enabled rich augmentation fires on a given sample, drawn
+    # independently per op. Below 1.0 on purpose: the test set is clean, so the model should
+    # still meet unperturbed volumes during training. It also halves the augmentation cost.
+    rich_prob: float = 0.5
 
 
 @dataclass

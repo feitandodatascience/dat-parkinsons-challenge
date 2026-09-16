@@ -1,0 +1,117 @@
+# Richer training-time augmentation, at run 1's exact geometry.
+#
+# WHY THIS RUN EXISTS
+# -------------------
+# docs/05 priced a full 5-fold run at "R", left R unmeasured, and every "we cannot afford to
+# retrain" decision in this project inherited that blank. Measured on 2026-09-15: one fold-epoch
+# is 399 s, so R = 16.6 h, not the ~48 h docs/07 back-derived. A retrain fits before the
+# deadline; 128^3 @ 1.5 mm (2.37x the voxels, 39.4 h) still does not, and is now closed on a
+# measured basis rather than an estimated one.
+#
+# WHAT IS DIFFERENT FROM baseline.yaml, AND WHAT IS DELIBERATELY NOT
+# ------------------------------------------------------------------
+# ONLY the five rich augmentation knobs, plus early stopping off. Geometry, architecture, seed,
+# learning rate, schedule, fold column and the six original augmentation magnitudes are all
+# byte-identical to run 1. That is the point: the comparison against run 1 is the experiment, and
+# widening `rotate_degrees` or `scale_range` at the same time would confound the two changes with
+# no way to separate them afterwards on a single run.
+#
+# It also keeps the whole refit chain valid. Same geometry means the SBR features, the test-time
+# view set and the packaging path are all unchanged; only the temperature and the stack
+# coefficients need refitting, which costs minutes rather than re-running Phase 3.
+#
+# WHAT THE NEW AUGMENTATIONS IMITATE
+# ----------------------------------
+# The recorded spread across the ten centres is in acquisition geometry, not anatomy: field of
+# view 176-630 mm, in-plane spacing 2.46-3.895 mm. So the perturbations that should matter most
+# are the ones that imitate a different scanner rather than a different patient.
+#
+#   blur_sigma_max  a different camera resolution or reconstruction filter. The most physically
+#                   motivated item here, and the one aimed squarely at the measured domain shift.
+#   count_noise     SPECT is a counting measurement, so noise grows as the square root of
+#                   signal. `noise_std` (constant width, already applied by the dataset) is the
+#                   wrong shape for that and stays at its run-1 value alongside this.
+#   gamma_range     uptake scaling differences between centres, as a signed power so that the
+#                   reference region (zero) stays fixed and the negative half stays finite.
+#   elastic_alpha   anatomical variability an affine cannot express. 3 voxels at 2.0 mm is a
+#                   6 mm peak displacement.
+#   mixup_alpha     the metric is log loss, where calibration is worth as much as discrimination,
+#                   and mixup's best-documented effect is on calibration. This knob has been
+#                   declared in config.py since the first commit and read by nothing until now.
+#
+# `flip_lr` stays false and is not up for discussion in this run: DaT abnormality is frequently
+# asymmetric and the more-affected side is diagnostic (docs/01 section 4).
+#
+# Cutout / coarse dropout is deliberately absent. On a task whose label is "is striatal uptake
+# reduced", occluding a cube inside the striatal box does not augment the input, it corrupts the
+# label.
+#
+# BAR TO CLEAR
+# ------------
+# OOF log loss beating baseline_tta_blend's 0.3061 by more than ~0.01 after the same TTA and
+# blend are applied. Two CV-to-leaderboard gaps have been observed, +0.0024 and -0.0088, so a
+# smaller margin than that is unresolved rather than won, and the banked 0.2973 build ships.
+
+run_name: aug_rich
+seed: 42
+output_dir: models
+
+data:
+  root: data/raw
+  labels_csv: data/raw/train_labels.csv
+  nifti_dir: data/raw/niftis
+  folds_csv: data/interim/folds.csv
+  # Identical to baseline.yaml, so the preprocessing cache built by run 1 is reused and this run
+  # spends none of its 16 hours rebuilding it.
+  target_spacing_mm: [2.0, 2.0, 2.0]
+  target_shape: [96, 96, 96]
+  normalization: reference_region
+  crop: com
+  cache_dir: data/processed/cache
+
+model:
+  name: resnet3d
+  widths: [16, 32, 64, 128]
+  dropout: 0.3
+  in_channels: 1
+
+train:
+  epochs: 30
+  batch_size: 8
+  lr: 0.0003
+  weight_decay: 0.0001
+  scheduler: cosine
+  warmup_epochs: 2
+  amp: true
+  grad_clip: 1.0
+  # Off, for the reason conf/highres.yaml records and the schedule experiment confirmed on five
+  # folds: `T_max = epochs`, so stopping early selects weights from before the low-rate endgame,
+  # and folds 1 and 4 of baseline_anneal peaked at epochs 17 and 15. `best_state` restoration
+  # means the extra epochs cannot make the shipped weights worse. Stronger augmentation is also
+  # expected to move the optimum later, not earlier, which makes patience the wrong lever here.
+  early_stopping_patience: 999
+  # 4 workers against 4 torch threads on 8 logical cores. Augmentation costs ~180 ms per sample
+  # on average and runs in the workers, against ~366 ms of main-process compute per sample, so
+  # it should be hidden rather than added. Epoch 0's wall clock is the check on that.
+  num_workers: 4
+  fold_column: fold_strat
+  folds: [0, 1, 2, 3, 4]
+
+aug:
+  # --- identical to baseline.yaml ---
+  flip_lr: false
+  rotate_degrees: 10.0
+  translate_mm: 5.0
+  scale_range: [0.9, 1.1]
+  intensity_jitter: 0.1
+  noise_std: 0.01
+  # --- new, implemented in src/datpd/augment.py ---
+  elastic_alpha: 3.0
+  blur_sigma_max: 1.0
+  gamma_range: [0.85, 1.18]
+  count_noise: 0.05
+  mixup_alpha: 0.2
+  mixup_prob: 0.5
+  # Each of the four volume perturbations fires independently with this probability. Below 1.0
+  # on purpose: the test set is clean, so the model should still meet unperturbed volumes.
+  rich_prob: 0.5
