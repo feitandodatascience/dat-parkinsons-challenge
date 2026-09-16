@@ -450,6 +450,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="clip used for every reported score; also the sweep's reference")
     parser.add_argument("--n-boot", type=int, default=10000,
                         help="bootstrap resamples for each paired comparison")
+    parser.add_argument(
+        "--ship",
+        choices=("default", "bagged", "tuned", "tuned+bagged"),
+        default=None,
+        help="OVERRIDE the acceptance rule and ship this tree configuration regardless. For a "
+             "free final submission only; the report states that the rule was overridden.",
+    )
+    parser.add_argument(
+        "--out-run",
+        default=None,
+        help="name for the output run dir and report (default: <run>_blend). Use it to build a "
+             "variant without overwriting artifacts a shipped build came from.",
+    )
     parser.add_argument("--margin", type=float, default=0.002,
                         help="gain below which a change is not worth the complexity it adds")
     parser.add_argument(
@@ -626,6 +639,15 @@ def main() -> int:
         if promote:
             accepted = key
 
+    # An explicit override, for the one situation the rule was not written for: a submission slot
+    # that is worth nothing if unused. The rule protects a scarce slot from noise; it does not say
+    # a free slot should stay empty. Overriding is allowed, but never silently.
+    rule_choice = accepted
+    if args.ship is not None:
+        if args.ship not in trees:
+            raise SystemExit(f"--ship {args.ship}: that configuration was not fitted on this run")
+        accepted = args.ship
+
     ship_name = f"CNN + {labels[accepted]}"
     ship_cols = [cnn_col, tree_col[accepted]]
     ship_gbm = trees[accepted]
@@ -650,7 +672,8 @@ def main() -> int:
     best_eps = min(clip_losses, key=lambda e: clip_losses[e])
 
     # --- Artifacts -----------------------------------------------------------------------------
-    blend_dir = REPO_ROOT / args.models_dir / f"{args.run}_blend"
+    out_name = args.out_run or f"{args.run}_blend"
+    blend_dir = REPO_ROOT / args.models_dir / out_name
     blend_dir.mkdir(parents=True, exist_ok=True)
 
     # Bank the held-out predictions of the shipped configuration as a run of its own, so the
@@ -983,13 +1006,13 @@ def main() -> int:
             "## Verdict: worth shipping",
             "",
             "Artifacts are written next to the predictions that justify them, in",
-            f"`{args.models_dir}/{args.run}_blend/`: `gbm_fold*.txt` (lightgbm boosters, text",
+            f"`{args.models_dir}/{out_name}/`: `gbm_fold*.txt` (lightgbm boosters, text",
             "format, version-portable) and `stack.json` (the three coefficients plus the feature",
             "order). To build a submission carrying them:",
             "",
             "```",
             f"python scripts/05_package_submission.py --config conf/baseline.yaml"
-            f" --blend-from {args.run}_blend"
+            f" --blend-from {out_name}"
             f" --fallback {y.mean():.4f} --clip-eps {args.clip_eps:g}",
             "```",
             "",
@@ -1016,12 +1039,18 @@ def main() -> int:
         "numbers above:",
         "",
         "```bash",
-        f"python scripts/11_compare_runs.py --run-a {args.run} --run-b {args.run}_blend",
+        f"python scripts/11_compare_runs.py --run-a {args.run} --run-b {out_name}",
         "```",
         "",
     ]
 
-    report_path = REPO_ROOT / "reports" / "experiments" / f"{args.run}_blend.md"
+    if accepted != rule_choice:
+        lines.insert(
+            0,
+            f"> **ACCEPTANCE RULE OVERRIDDEN.** The rule chose `{rule_choice}`; `--ship {accepted}` "
+            "shipped instead. Read the variants table as the evidence, not as an endorsement.\n",
+        )
+    report_path = REPO_ROOT / "reports" / "experiments" / f"{out_name}.md"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text("\n".join(lines), encoding="utf-8")
 
