@@ -10,15 +10,15 @@
 |---|---:|---:|---:|
 | CNN (baseline_tta) | 0.3239 | 0.9306 | 0.0370 |
 | SBR trees (default) | 0.3659 | 0.9184 | 0.0329 |
-| SBR trees (tuned) | 0.3617 | 0.9202 | 0.0302 |
+| CNN (aug_rich_tta) | 0.3317 | 0.9303 | 0.0231 |
 
 ### Pairwise logit correlations
 
 | a | b | rho | 1 - rho |
 |---|---|---:|---:|
 | CNN (baseline_tta) | SBR trees (default) | 0.825 | 0.175 |
-| CNN (baseline_tta) | SBR trees (tuned) | 0.810 | 0.190 |
-| SBR trees (default) | SBR trees (tuned) | 0.980 | 0.020 |
+| CNN (baseline_tta) | CNN (aug_rich_tta) | 0.917 | 0.083 |
+| SBR trees (default) | CNN (aug_rich_tta) | 0.780 | 0.220 |
 
 A low correlation is the point. Two models that agree everywhere cannot help each
 other; a component is worth something precisely to the extent it disagrees. The
@@ -43,14 +43,15 @@ every level, so it is not the minimum of a curve fitted to the rows it is quoted
 | stack over | params | CV log loss | Δ vs shipped | σ | 95% CI | scans improved |
 |---|---:|---:|---:|---:|---|---:|
 | CNN alone | 2 | 0.3201 | +0.02296 | 3.9σ | [+0.01163, +0.03443] | 35.7% |
-| CNN + trees (default) | 3 | 0.2972 | — | — | — (reference) | — |
-| CNN + trees (tuned) **<- ships** | 3 | 0.2929 | -0.00429 | 2.1σ | [-0.00829, -0.00022] | 57.8% |
+| CNN + trees (default) **<- ships** | 3 | 0.2972 | — | — | — (reference) | — |
+| CNN + extras, no trees | 3 | 0.3049 | +0.00770 | 1.1σ | [-0.00596, +0.02152] | 45.4% |
+| CNN + trees (default) + extras | 4 | 0.2866 | -0.01056 | 2.6σ | [-0.01859, -0.00252] | 66.4% |
 
-- **gain from adding the tree model: -0.0273** (negative is an improvement)
-- same stack scored in-sample, for reference: 0.2893 (optimistic by +0.0036)
+- **gain from adding the tree model: -0.0230** (negative is an improvement)
+- same stack scored in-sample, for reference: 0.2931 (optimistic by +0.0041)
 
-- fitted coefficients: CNN +0.560, trees +0.422 (trees carry 43% of the total weight)
-- intercept +0.025
+- fitted coefficients: CNN +0.570, trees +0.396 (trees carry 41% of the total weight)
+- intercept +0.033
 
 A CNN coefficient below 1.0 is the temperature scaling reappearing inside the stack —
 expected, and the reason the weight is fitted this way rather than as a convex blend.
@@ -68,11 +69,7 @@ complexity and promoted only on a mean better than -0.002 **and** a bootstrap
 interval excluding zero. Each comparison is against the incumbent at that point, not
 against the default, so a chain of near-ties cannot accumulate into a promotion.
 
-| candidate | against | Δ | σ | 95% CI | improved | promoted |
-|---|---|---:|---:|---|---:|---|
-| trees (tuned) | trees (default) | -0.00429 | 2.1σ | [-0.00829, -0.00022] | 57.8% | **yes** |
-
-- shipping: **trees (tuned)**
+- no alternative candidates were fitted; the default configuration ships.
 
 ## Seed bagging
 
@@ -85,30 +82,9 @@ fold under fixed distinct seeds and averages them in logit space inside the fold
 
 ## Hyperparameter tuning
 
-- grid: 12 configurations
-- selection: **nested** — inner 3-fold cross-validation within each outer fold's training rows
-- the held-out fold is never seen by the selection, so **the CV log loss reported
-  above is NOT optimistic on account of the tuning.** The choice is part of the
-  procedure being cross-validated, exactly as the stack's own fit is.
-
-Configurations selected across the outer folds:
-
-| configuration | folds that chose it |
-|---|---:|
-| `deeper-regularised` | 3 |
-| `high-min-child` | 1 |
-| `stumps-slow-long` | 1 |
-
-Folds may disagree, and that is not a bug — it is the honest version. The shipped
-boosters each carry the parameters chosen on their own training rows, so the shipped
-ensemble is bit-for-bit the procedure that was measured. Refitting one 'best'
-configuration on all the data would ship something that was never scored.
-
-One residual optimism that no nesting can remove: the **decision** to prefer a
-tuned candidate is taken by looking at held-out numbers, so the margin by which it
-wins is itself selected. The acceptance chain above is the mitigation — a rule fixed
-in advance rather than 'whichever number is lower' — but a promoted candidate's
-quoted gain should still be read as the optimistic end of its interval.
+Not run. The booster used the hand-set defaults in `GBM_PARAMS`; no hyperparameter
+was chosen on this data, so nothing in the table above is optimistic on that count.
+Re-run with `--tune` to search.
 
 ## Clip epsilon
 
@@ -117,17 +93,17 @@ sweep for the CNN alone is in `reports/experiments/baseline.md`.
 
 | clip eps | CV log loss |
 |---:|---:|
-| 1e-06 | 0.2929 **<- best** |
-| 1e-05 | 0.2929 |
-| 0.0001 | 0.2929 |
-| 0.001 | 0.2929 |
-| 0.005 | 0.2930 |
-| 0.01 | 0.2936 |
-| 0.02 | 0.2957 |
-| 0.05 | 0.3027 |
+| 1e-06 | 0.2972 **<- best** |
+| 1e-05 | 0.2972 |
+| 0.0001 | 0.2972 |
+| 0.001 | 0.2972 |
+| 0.005 | 0.2973 |
+| 0.01 | 0.2978 |
+| 0.02 | 0.2995 |
+| 0.05 | 0.3070 |
 
-- best on this OOF set: **1e-06** (0.2929), against
-  0.2929 at the shipped 1e-06 — a difference of
+- best on this OOF set: **1e-06** (0.2972), against
+  0.2972 at the shipped 1e-06 — a difference of
   +0.0000.
 - **this minimum is chosen in-sample.** Any apparent gain from moving off the shipped
   epsilon is optimistic by exactly the amount the curve was fitted to this data, so a
@@ -135,6 +111,16 @@ sweep for the CNN alone is in `reports/experiments/baseline.md`.
 - a tight clip is insurance, not accuracy: it caps what one confidently-wrong scan can
   cost. On a test set drawn differently from this one, the flat region is the safe place
   to sit.
+
+## Extra components and the shipped format
+
+`submission_src/main.py` bakes exactly three constants — `STACK_INTERCEPT`,
+`STACK_COEF_CNN`, `STACK_COEF_GBM` — so **a stack over more than two components
+cannot be expressed in what ships today.** `stack.json` therefore holds the
+two-component fit, and the N-component fit is written beside it as
+`stack_ncomp.json`, flagged as not shippable. Carrying it would need a fourth
+constant and a second CNN pass inside `main.py`: a change to the inference path,
+with its own timing and logging checks, not a change to this script.
 
 ## Verdict: worth shipping
 
