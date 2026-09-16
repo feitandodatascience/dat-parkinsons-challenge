@@ -3,31 +3,36 @@
 DrivenData competition #311, French Society of Nuclear Medicine (SFMN) / Health Data Hub / GaelO.
 Binary classification of DaT SPECT scans as normal or abnormal, scored by **log loss**.
 
-**Status: draft, 2026-09-11.** Written before the freeze deliberately — the exercise of stating
-each decision and the evidence for it is what makes the freeze safe, and doing it afterwards
-would be a write-up rather than a review.
+**Status: updated 2026-09-16, deadline day.** First drafted 2026-09-11, before the freeze, because
+stating each decision with its evidence is what makes a freeze safe. Revised after the final two
+days overturned two of its conclusions — see §5.1 and §5.2, which are kept in corrected form rather
+than rewritten as though the first answer had never been given.
 
 | | |
 |---|---|
-| Best submission | **0.2973** log loss, AUROC 0.9396 (rank #98/897 at submission) |
-| Out-of-fold estimate | 0.3061 |
+| Final build (candidate B) | out-of-fold **0.2841** — submitted on deadline day |
+| Best scored submission before it | **0.2935** log loss (candidate A; out-of-fold 0.2929) |
+| First blended submission | 0.2973, AUROC 0.9396 (rank #98/897 at the time) |
 | Prior baseline (predict the training rate) | 0.6884 |
-| Inference runtime | 15 min of a 3 h budget, on the platform's A100 |
+| Inference runtime | 15 min of a 3 h budget with 5 CNNs; the final build ships 10 |
 | Training hardware | CPU only (Intel Iris Xe, no CUDA) — the binding constraint on everything below |
 
 ---
 
 ## 1. The solution in one paragraph
 
-A 5-fold ensemble of 3D residual CNNs over resampled DaT SPECT volumes, averaged in logit space
-across folds and across nine laterality-preserving test-time-augmentation views, then **stacked
-with a LightGBM model over 61 handcrafted SBR-style geometric features** via a three-parameter
-logistic regression. The stack's CNN coefficient absorbs the calibration that a temperature
+Two 5-fold ensembles of 3D residual CNNs over resampled DaT SPECT volumes — one trained with
+conventional augmentation, one with a richer, scanner-physics-motivated set (§2.2) — ten models
+averaged in logit space across folds, runs, and nine laterality-preserving test-time-augmentation
+views, then **stacked with a LightGBM model over 157 handcrafted SBR-style geometric features** via
+a three-parameter logistic regression. The stack's CNN coefficient absorbs the calibration that a temperature
 scaler would otherwise apply, so no separate temperature is used in the shipped path.
 Predictions are clipped to [1e-6, 1-1e-6].
 
-The single most valuable component is not the CNN. It is the **blend** — worth −0.0175 against
-−0.0022 for TTA — and it pays precisely because the tree model *disagrees* with the CNN.
+The single most valuable idea is not a model. It is **diversity**: the tree model is far worse
+than the CNN and was still the largest gain, and the richer-augmentation CNN is *worse than the CNN
+it was ensembled with* (0.3358 against 0.3271 out of fold) and still bought −0.0101 over the
+previous best stack. Both pay for the same reason — their errors fall in different places.
 
 ---
 
@@ -60,6 +65,18 @@ intensity jitter 0.1, Gaussian noise σ 0.01. **No left-right flip** — see §3
 Model selection is on **validation log loss**, the competition metric, and the best epoch's
 weights are restored rather than the last.
 
+**The second run (`conf/aug_rich.yaml`)** keeps every one of those settings and adds five
+augmentations in `src/datpd/augment.py`, chosen to imitate a *different scanner* rather than a
+different patient, because the recorded spread across the ten centres is in acquisition geometry
+(field of view 176–630 mm, spacing 2.46–3.895 mm), not anatomy: Gaussian PSF blur (camera
+resolution), signal-proportional count noise (SPECT counting statistics), a signed power
+`sign(x)·|x|^γ` (uptake scaling, valid on a reference-normalised array whose background is
+negative), a smooth elastic warp, and mixup (α 0.2, for calibration). Each fires with probability
+0.5. Cutout was excluded: occluding part of the striatal box can turn a normal scan into one that
+reads as unilateral loss, which corrupts the label rather than augmenting the input. Early stopping
+is **off** in this run, and every fold's best epoch fell between 15 and 21 — at patience 8, most
+would have stopped before reaching it.
+
 ### 2.3 Test-time augmentation
 
 Nine deterministic views: small rotations, translations and scale jitter drawn from the same
@@ -73,20 +90,27 @@ rider on the blend rather than on its own evidence — its marginal cost is near
 
 ### 2.4 The SBR feature model and the stack
 
-61 features computed from the same COM-cropped canonical volume the CNN sees, in four groups:
-intensity (global and within a striatal box), supra-threshold extent and shape descriptors,
-laterality indices per axis, and the caudate-to-putamen gradient within each hemisphere.
+157 features computed from the same COM-cropped canonical volume the CNN sees: intensity (global
+and within a striatal box), supra-threshold extent and shape descriptors at several cut levels,
+laterality indices per axis on robust statistics, the caudate-to-putamen gradient both across the
+box and within each hemisphere's supra-threshold mask, connected-component structure, and a
+two-lobe count. The original set was 61, and three of those were numerically broken (§4.8).
 `src/datpd/features.py` is the single definition, and it is **vendored into the submission**, so
 inference cannot drift from what the trees were fitted on.
 
-Five LightGBM boosters (one per fold), combined by a logistic stack over two inputs — the CNN
-logit and the tree logit:
+Five LightGBM boosters (one per fold), combined by a logistic stack over two inputs — the mean
+CNN logit across all ten models, and the tree logit:
 
 ```
-z = 0.0236 + 0.6164 * cnn_logit + 0.3779 * gbm_logit
+z = 0.0485 + 0.6935 * cnn_logit + 0.3642 * gbm_logit
 ```
 
-**Why it works, and it is not what it looks like.** The tree model *alone* scores 0.3919 against
+The two CNN runs enter as a **plain average**, not as separate stack columns. Fitting a coefficient
+for each was measured and was worse (0.2866 against 0.2841): at n = 1362 the extra parameter costs
+more in estimation noise than any imbalance between the runs can buy back. It also means the final
+build needed no inference-code change, since `main.py` already averages every `fold*.pt` it finds.
+
+**Why it works, and it is not what it looks like.** The original 61-feature tree model *alone* scored 0.3919 against
 the CNN's 0.3186 — substantially worse. It improves the ensemble anyway because its logits
 correlate only **0.797** with the CNN's. Diversity paid, not quality. That single number is the
 most useful thing learned in this project, and it is what closed the case for adding a second CNN
@@ -101,8 +125,8 @@ on LightGBM, the gain held (−0.01562 against scikit-learn's −0.01458).
 ### 2.5 Calibration
 
 Temperature scaling, fitted on out-of-fold predictions. **In the shipped blend path there is no
-separate temperature**: `STACK_COEF_CNN = 0.6164` was fitted on logits that were never
-temperature-scaled, so it already carries the calibration (equivalent to T ≈ 1.62). Applying
+separate temperature**: `STACK_COEF_CNN = 0.6935` was fitted on logits that were never
+temperature-scaled, so it already carries the calibration (equivalent to T ≈ 1.44). Applying
 `TEMPERATURE` as well would soften twice and give back most of the gain. The packager refuses
 `--temperature` alongside `--blend-from`, and a test asserts the blend path never references it.
 
@@ -248,12 +272,35 @@ report now reads the history files directly.
 
 ---
 
+### 4.8 Three features divided by a mean that crosses zero
+
+`box_to_shell`, `box_to_global` and `box_peak_to_shell` are ratios whose denominators — a shell mean
+and a global mean — sit near zero under reference-region normalisation and change sign between
+scans. Their recorded distributions were impossible for a contrast (std 147, 88 and 1109; p05 −23,
+p95 −0.70), and a ratio that flips sign as its denominator crosses zero is not monotone in what it
+measures, so gradient boosting could not use it. The aggregate report showing this had existed
+since the features were first computed.
+
+Fixed by addition rather than replacement — the originals keep their values, and robust
+counterparts (differences in normalised units, ratios against a strictly positive scale) sit beside
+them — then extended to 157 features with a nested hyperparameter search. Stacked out-of-fold log
+loss **0.3038 → 0.2929**; leaderboard **0.2973 → 0.2935**. An ablation over the original 61 columns
+reproduces 0.3038 exactly and shows tuning worth −0.0005 (0.5σ) there, against −0.0043 (2.1σ) on the
+repaired set: **the tuning only paid because the features had been fixed.**
+
+---
+
 ## 5. Rejected, with reasons
 
 ### 5.1 Higher resolution (128³ @ 1.5 mm) — the largest win not taken
 
-2.37× the voxels of 96³, priced at **~2.4 R** where R is one full 5-fold run. On the available
-CPU that is roughly five days against a budget of about two. Expected gain −0.02 to −0.05, which
+2.37× the voxels of 96³, priced at **~2.4 R** where R is one full 5-fold run.
+
+**The first version of this section said "roughly five days", and that was wrong by 3×.** R had
+never been measured; a guess of ~48 h propagated through every plan. Timed on deadline eve with a
+one-epoch probe (`conf/timing_probe.yaml`), R is **16.6 h**, so 128³ costs **~39 h**. It still did
+not fit the remaining window, so the conclusion stands — but a retrain at 96³ had been affordable
+all along, and that retrain became half of the final build (§5.2). Expected gain −0.02 to −0.05, which
 would very likely have made it the single largest improvement in the project.
 
 Renting GPU compute was cleared with the organizers (see `docs/07_cloud_compute_compliance.md` for
@@ -262,9 +309,18 @@ in time. `conf/highres.yaml` is written and ready.
 
 **This is the honest gap in the solution.** It was a compute constraint, not a judgement.
 
-### 5.2 A second CNN architecture, ensembled
+### 5.2 A second CNN, ensembled — rejected, then shipped
 
-Rejected on the correlation argument in §2.4 rather than by measurement. The blend paid −0.0175 at
+**Outcome first, because it reverses the rest of this section.** A second CNN of the *same*
+architecture, trained with the richer augmentation of §2.2, correlates at **ρ = 0.9135** with the
+first — against 0.974 for a same-recipe run that changed only the schedule. Calibrated and paired,
+the CNN ensemble is −0.0153 (2.9σ, AUROC +0.0087), and inside the full stack it beats the previous
+best by **−0.0101 (2.4σ, CI [−0.0185, −0.0017])**. The original reasoning below was right about the
+mechanism and wrong about where diversity can come from: it assumed a second 3D CNN on identical
+data would sit near ρ 0.95–0.97, and a changed *training distribution* moved it well below that
+without touching the architecture.
+
+The original argument: rejected on the correlation argument in §2.4 rather than by measurement. The blend paid −0.0175 at
 ρ = 0.797. Two 3D CNNs on identical data and preprocessing correlate ~0.90–0.95, so the
 variance-reduction benefit scales to roughly **−0.004 to −0.009** — inside the ±0.01 band of §4.2,
 meaning the result could not have been confirmed on the leaderboard even if positive.
@@ -378,11 +434,19 @@ python scripts/03_train.py --config conf/baseline.yaml      # 5-fold CV  (~1 nig
 python scripts/04_evaluate.py --run baseline                # OOF metrics, calibration choice
 python scripts/07_tta.py --config conf/baseline.yaml --run baseline
 python scripts/08_sbr_features.py --config conf/baseline.yaml
-python scripts/09_blend.py --run baseline_tta
-python scripts/11_compare_runs.py --run-a baseline --run-b baseline_tta_blend
+python scripts/03_train.py --config conf/aug_rich.yaml      # second run, richer augmentation
+python scripts/07_tta.py --config conf/aug_rich.yaml --run aug_rich
+python scripts/12_ensemble_runs.py --runs baseline_tta aug_rich_tta --out-run ens_tta
+python scripts/09_blend.py --run ens_tta --tune
+python scripts/11_compare_runs.py --run-a baseline_tta_blend --run-b ens_tta_blend
+python scripts/13_stage_checkpoints.py --runs baseline aug_rich --config conf/baseline.yaml
 python scripts/05_package_submission.py --config conf/baseline.yaml --tta \
-    --blend-from baseline_tta_blend --fallback 0.5485 --clip-eps 1e-06
+    --blend-from ens_tta_blend --fallback 0.5485 --clip-eps 1e-06
 ```
+
+`09_blend.py --tune` applies a pre-registered promotion rule and, on the ensembled stack, declines
+to promote the tuned booster (−0.0020, 1.3σ), so the default booster ships. `03_train.py` does not
+skip completed folds: resume an interrupted run with `--folds` naming only the unfinished ones.
 
 `seed: 42` throughout, set via `datpd.utils.seed.set_seed`. `pytest -q` runs the full suite on
 **synthetic volumes only** and requires no competition data.
@@ -404,7 +468,12 @@ negative results. Per-submission platform logs are in `reports/submissions/`.
    was a single point, and a single point has no spread.
 5. **Look for diversity, not capacity.** The tree model is much worse than the CNN and is the
    largest single gain in the solution. That generalises further than anything else here.
-6. **Test the free version of an idea before paying for the expensive one.** The two-run ensemble
+6. **Measure the unit of account before pricing anything in it.** R was a blank in the budget
+   document for the life of the project, filled by a 3× overestimate that ruled out the retrain
+   which became half of the final build. A seven-minute probe would have settled it on day one.
+7. **Read the aggregate reports you already have.** The three broken features in §4.8 were visible
+   in a summary table for a week, and the largest late gain came from finally looking at it.
+8. **Test the free version of an idea before paying for the expensive one.** The two-run ensemble
    (§5.2) was answerable in seconds from OOF files already on disk, and the answer made a CPU
    hour and a repackage unnecessary. The reflex to reach for the full experiment first is what
    the compute budget could least afford.
