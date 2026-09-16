@@ -327,9 +327,14 @@ def main() -> int:
     parser.add_argument("--clip-eps", type=float, default=None,
                         help="prediction clip chosen on OOF by scripts/04_evaluate.py")
     parser.add_argument("--tta", action="store_true",
-                        help="bake the nine-view test-time augmentation set into main.py. "
+                        help="bake a test-time augmentation view set into main.py. "
                              "Only after scripts/07_tta.py shows it helps on OOF, and only "
                              "with a temperature refitted on the TTA predictions.")
+    parser.add_argument("--tta-preset", default="default",
+                        help="which VIEW_PRESETS entry from scripts/07_tta.py to bake "
+                             "(default: 'default', the nine-view set). Must name the SAME "
+                             "preset the OOF measurement was run with - `07_tta.py --views "
+                             "<preset>` - or the shipped model is not the validated one.")
     parser.add_argument("--blend-from", default=None,
                         help="run directory under models/ holding gbm_fold*.txt and stack.json "
                              "(written by scripts/09_blend.py). Ships the SBR tree ensemble "
@@ -358,7 +363,17 @@ def main() -> int:
         assert spec is not None and spec.loader is not None
         tta_module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(tta_module)
-        baked["TTA_VIEWS"] = tta_module.VIEW_PRESETS["default"]
+        presets = tta_module.VIEW_PRESETS
+        if args.tta_preset not in presets:
+            raise SystemExit(
+                f"unknown --tta-preset {args.tta_preset!r}; "
+                f"scripts/07_tta.py defines {', '.join(sorted(presets))}"
+            )
+        baked["TTA_VIEWS"] = presets[args.tta_preset]
+    elif args.tta_preset != "default":
+        # Silently baking nothing because the other flag was forgotten is exactly the failure
+        # this whole script exists to prevent.
+        raise SystemExit("--tta-preset does nothing without --tta")
 
     if args.blend_from:
         if args.temperature is not None:

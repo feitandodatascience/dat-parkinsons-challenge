@@ -26,6 +26,14 @@ more-affected side carries clinical meaning (docs/01 4), so averaging a scan wit
 image destroys exactly the signal the task depends on. Every view here is small and
 laterality-preserving.
 
+Two axes of variation
+---------------------
+`identity`, `rot4`, `default` and `wide17` perturb geometry only. `photo5` and `photo13` add a
+pointwise intensity perturbation - a gain and a signed gamma - which no geometric view can
+reach: resampling a volume cannot change the fact that every view shares one intensity
+realisation, so averaging them reduces no intensity-related variance. See the comment above
+`photo5` for why a naive gamma is a domain error on this signed array.
+
 Recalibrate afterwards
 ----------------------
 Averaging shrinks logits toward zero, so the temperature fitted for the un-augmented run is
@@ -58,7 +66,10 @@ from datpd.models.factory import build_model  # noqa: E402
 from datpd.utils.metrics import summarize  # noqa: E402
 from datpd.utils.seed import set_seed  # noqa: E402
 
-# One view = (rotation degrees, plane of rotation, shift in voxels, isotropic scale).
+# One view = (rotation degrees, plane of rotation, shift in voxels, isotropic scale) and,
+# optionally, two more elements: (intensity gain, signed gamma). Both default to 1.0 = no
+# change, so a four-element view still means exactly what it meant before this existed and
+# every preset measured under the old signature reads the same today.
 #
 # Magnitudes are deliberately smaller than the training augmentation (10 deg, 5 mm, 0.9-1.1).
 # Training augmentation should span more than the test distribution, to regularise; TTA should
@@ -68,7 +79,11 @@ from datpd.utils.seed import set_seed  # noqa: E402
 # The identity view is first and is what a single-view run would have produced, which makes
 # `--views 1` an exact reproduction of the original OOF predictions and therefore a usable
 # control.
-VIEW_PRESETS: dict[str, tuple[tuple[float, tuple[int, int], tuple[int, int, int], float], ...]] = {
+GeometricView = tuple[float, tuple[int, int], tuple[int, int, int], float]
+PhotometricView = tuple[float, tuple[int, int], tuple[int, int, int], float, float, float]
+View = GeometricView | PhotometricView
+
+VIEW_PRESETS: dict[str, tuple[View, ...]] = {
     "identity": (
         (0.0, (1, 2), (0, 0, 0), 1.0),
     ),
@@ -94,6 +109,95 @@ VIEW_PRESETS: dict[str, tuple[tuple[float, tuple[int, int], tuple[int, int, int]
         (0.0, (1, 2), (0, +2, 0), 1.00),
         (0.0, (1, 2), (0, -2, 0), 1.00),
     ),
+    # Wider and denser geometry, 17 views. A strict SUPERSET of `default`: the first nine
+    # entries are `default` verbatim, so whatever this scores differs from the shipped number
+    # only because of the eight added views, and the comparison needs no other control.
+    #
+    # What it adds over `default`, and why each:
+    #   - a second, smaller rotation magnitude (+-2 deg). `default` samples one radius only, so
+    #     its rotation average is a ring; adding an inner ring makes the average an area.
+    #   - rotation in the third plane (0, 1), the only one `default` never touches. A rotation
+    #     is a rigid motion, never a reflection, so rotating in a plane that contains the
+    #     left-right axis does not mirror anything - it tilts, exactly as a differently
+    #     positioned head would.
+    #   - shifts along axis 2 as well as axis 1, so translation is sampled in a plane rather
+    #     than on a line. Axis 0 (left-right) is still never shifted by more than a voxel; it
+    #     is not shifted at all here.
+    #   - scale composed WITH rotation rather than only on its own. Scale and rotation are the
+    #     two transforms the model is least invariant to, and a set that only ever varies them
+    #     one at a time samples the axes but not the corners.
+    "wide17": (
+        (0.0, (1, 2), (0, 0, 0), 1.00),
+        (+4.0, (1, 2), (0, 0, 0), 1.00),
+        (-4.0, (1, 2), (0, 0, 0), 1.00),
+        (+4.0, (0, 2), (0, 0, 0), 1.00),
+        (-4.0, (0, 2), (0, 0, 0), 1.00),
+        (0.0, (1, 2), (0, 0, 0), 0.96),
+        (0.0, (1, 2), (0, 0, 0), 1.04),
+        (0.0, (1, 2), (0, +2, 0), 1.00),
+        (0.0, (1, 2), (0, -2, 0), 1.00),
+        (+2.0, (1, 2), (0, 0, 0), 1.00),
+        (-2.0, (1, 2), (0, 0, 0), 1.00),
+        (+3.0, (0, 1), (0, 0, 0), 1.00),
+        (-3.0, (0, 1), (0, 0, 0), 1.00),
+        (0.0, (1, 2), (0, 0, +2), 1.00),
+        (0.0, (1, 2), (0, 0, -2), 1.00),
+        (+4.0, (1, 2), (0, 0, 0), 0.97),
+        (-4.0, (1, 2), (0, 0, 0), 1.03),
+    ),
+    # The intensity axis alone, 5 views: identity plus two gain and two gamma perturbations,
+    # all on identity geometry. Every view in every other preset resamples geometry and nothing
+    # else, which means they all share ONE intensity realisation - averaging them cannot reduce
+    # any variance the model's sensitivity to intensity contributes. This is the cheapest
+    # possible test of whether that variance is worth attacking: four of the five views touch
+    # no interpolation at all, so it costs five forward passes and one preprocess.
+    #
+    # Why these two curves, and why a naive gamma would be wrong
+    # ---------------------------------------------------------
+    # The preprocessed array is REFERENCE-REGION normalised and therefore SIGNED: background
+    # sits below zero, striatum above it, and zero means "same uptake as the reference region".
+    # `x ** g` on that array is not a mild perturbation, it is a domain error - a negative base
+    # with a fractional exponent has no real value, so the background would come back NaN and
+    # the view would poison the whole average. Any intensity perturbation here has to be
+    # defined on a signed quantity.
+    #
+    #   gain  g : x -> g * x. Scales the signed deviation about zero, i.e. it rescales the
+    #             specific-binding ratio while leaving the reference level exactly where it is.
+    #             That is the physically real perturbation - camera sensitivity, reconstruction
+    #             and scatter correction all move this number between sites - and it is exactly
+    #             what the multicentre data varies (CLAUDE.md 4).
+    #   gamma g : x -> sign(x) * |x| ** g. The signed analogue of a gamma curve: monotone,
+    #             sign-preserving, finite for every real input, with fixed points at 0 and at
+    #             |x| = 1. It reshapes the striatum-to-background contrast rather than scaling
+    #             it, which is the part a gain cannot reach.
+    #
+    # Both are applied pointwise AFTER the geometry, so they add no second interpolation, and
+    # both come in pairs straddling 1.0 so the average stays centred on the identity.
+    "photo5": (
+        (0.0, (1, 2), (0, 0, 0), 1.00),
+        (0.0, (1, 2), (0, 0, 0), 1.00, 0.95, 1.00),
+        (0.0, (1, 2), (0, 0, 0), 1.00, 1.05, 1.00),
+        (0.0, (1, 2), (0, 0, 0), 1.00, 1.00, 0.96),
+        (0.0, (1, 2), (0, 0, 0), 1.00, 1.00, 1.04),
+    ),
+    # Geometry and intensity together, 13 views: `default` verbatim plus the four intensity
+    # views of `photo5`. Again a strict superset of the shipped set, so the delta is
+    # attributable. Run this one if `photo5` shows the intensity axis moves anything at all.
+    "photo13": (
+        (0.0, (1, 2), (0, 0, 0), 1.00),
+        (+4.0, (1, 2), (0, 0, 0), 1.00),
+        (-4.0, (1, 2), (0, 0, 0), 1.00),
+        (+4.0, (0, 2), (0, 0, 0), 1.00),
+        (-4.0, (0, 2), (0, 0, 0), 1.00),
+        (0.0, (1, 2), (0, 0, 0), 0.96),
+        (0.0, (1, 2), (0, 0, 0), 1.04),
+        (0.0, (1, 2), (0, +2, 0), 1.00),
+        (0.0, (1, 2), (0, -2, 0), 1.00),
+        (0.0, (1, 2), (0, 0, 0), 1.00, 0.95, 1.00),
+        (0.0, (1, 2), (0, 0, 0), 1.00, 1.05, 1.00),
+        (0.0, (1, 2), (0, 0, 0), 1.00, 1.00, 0.96),
+        (0.0, (1, 2), (0, 0, 0), 1.00, 1.00, 1.04),
+    ),
 }
 
 
@@ -103,62 +207,89 @@ def make_view(
     axes: tuple[int, int],
     shift_vox: tuple[int, int, int],
     scale: float,
+    gain: float = 1.0,
+    gamma: float = 1.0,
 ) -> np.ndarray:
-    """Apply one deterministic geometric perturbation, preserving shape.
+    """Apply one deterministic perturbation - geometry, then intensity - preserving shape.
 
-    Built as a single affine about the volume centre rather than a chain of ndimage calls, so
-    the volume is interpolated exactly once. Repeated interpolation is its own kind of
-    augmentation - a progressive blur - and it would confound the comparison this script exists
-    to make.
+    The geometry is built as a single affine about the volume centre rather than a chain of
+    ndimage calls, so the volume is interpolated exactly once. Repeated interpolation is its own
+    kind of augmentation - a progressive blur - and it would confound the comparison this script
+    exists to make.
 
     `mode="nearest"` rather than zero fill: the preprocessed volume is intensity-normalised and
     its border is background, so extending the border is closer to the truth than stamping a
     hard zero edge the model never saw in training.
+
+    `gain` and `gamma` are POINTWISE and are applied after the resampling, so they add no second
+    interpolation and the single-affine property above is untouched. They are defined for a
+    SIGNED array, because the reference-region normalised volume is one - background below zero,
+    striatum above it. `x ** gamma` would be a domain error on the background; the signed form
+    `sign(x) * |x| ** gamma` is monotone, sign-preserving and finite everywhere, with fixed
+    points at 0 and |x| = 1. `gain` simply rescales the signed deviation from the reference
+    level. Order is gamma then gain, and it matters only in that the shipped copy of this
+    function must apply them the same way round.
     """
     if array.ndim != 3:
         raise ValueError(f"expected a 3D volume, got shape {array.shape}")
+
+    geometric = not (rotate_deg == 0.0 and scale == 1.0 and tuple(shift_vox) == (0, 0, 0))
+    photometric = not (gain == 1.0 and gamma == 1.0)
 
     # Short-circuit the identity. Resampling a volume onto its own grid is a no-op in exact
     # arithmetic but not in floating point, and this path has to be *exactly* a no-op: it is
     # what `submission_src/main.py` runs when TTA is disabled, so turning TTA off must
     # reproduce the un-augmented predictions bit for bit rather than approximately.
-    if rotate_deg == 0.0 and scale == 1.0 and tuple(shift_vox) == (0, 0, 0):
+    if not geometric and not photometric:
         return array.astype(np.float32, copy=False)
 
-    matrix = np.eye(3, dtype=np.float64) / float(scale)
+    out = array.astype(np.float32, copy=False)
 
-    if rotate_deg:
-        theta = np.deg2rad(rotate_deg)
-        i, j = axes
-        if i == j or not {i, j} <= {0, 1, 2}:
-            raise ValueError(f"invalid rotation plane {axes}")
-        rotation = np.eye(3, dtype=np.float64)
-        rotation[i, i] = np.cos(theta)
-        rotation[i, j] = -np.sin(theta)
-        rotation[j, i] = np.sin(theta)
-        rotation[j, j] = np.cos(theta)
-        matrix = matrix @ rotation
+    if geometric:
+        matrix = np.eye(3, dtype=np.float64) / float(scale)
 
-    # affine_transform maps OUTPUT coordinates to INPUT ones, so the centre correction and the
-    # shift both apply in output space: offset = centre - M @ centre - shift.
-    centre = (np.asarray(array.shape, dtype=np.float64) - 1.0) / 2.0
-    offset = centre - matrix @ centre - np.asarray(shift_vox, dtype=np.float64)
+        if rotate_deg:
+            theta = np.deg2rad(rotate_deg)
+            i, j = axes
+            if i == j or not {i, j} <= {0, 1, 2}:
+                raise ValueError(f"invalid rotation plane {axes}")
+            rotation = np.eye(3, dtype=np.float64)
+            rotation[i, i] = np.cos(theta)
+            rotation[i, j] = -np.sin(theta)
+            rotation[j, i] = np.sin(theta)
+            rotation[j, j] = np.cos(theta)
+            matrix = matrix @ rotation
 
-    return ndimage.affine_transform(
-        array.astype(np.float32, copy=False),
-        matrix,
-        offset=offset,
-        order=1,
-        mode="nearest",
-        output_shape=array.shape,
-    ).astype(np.float32)
+        # affine_transform maps OUTPUT coordinates to INPUT ones, so the centre correction and
+        # the shift both apply in output space: offset = centre - M @ centre - shift.
+        centre = (np.asarray(array.shape, dtype=np.float64) - 1.0) / 2.0
+        offset = centre - matrix @ centre - np.asarray(shift_vox, dtype=np.float64)
+
+        out = ndimage.affine_transform(
+            out,
+            matrix,
+            offset=offset,
+            order=1,
+            mode="nearest",
+            output_shape=array.shape,
+        ).astype(np.float32)
+
+    # np.float32 on the exponent and the multiplier rather than a bare Python float, so the
+    # arithmetic cannot be promoted to float64 on one numpy version and not another. The
+    # shipped copy has to reproduce this bit for bit.
+    if gamma != 1.0:
+        out = np.sign(out) * np.abs(out) ** np.float32(gamma)
+    if gain != 1.0:
+        out = out * np.float32(gain)
+
+    return out.astype(np.float32, copy=False)
 
 
 @torch.no_grad()
 def predict_views(
     model: torch.nn.Module,
     array: np.ndarray,
-    views: tuple[tuple[float, tuple[int, int], tuple[int, int, int], float], ...],
+    views: tuple[View, ...],
     device: torch.device,
 ) -> float:
     """Mean LOGIT across views for one scan.
@@ -198,7 +329,18 @@ def main() -> int:
     # trap: per-fold predictions are banked as they finish, so a full run that dies partway
     # leaves the folds it never reached holding 40-row smoke files, and the pooled OOF silently
     # mixes the two. Separate directories make that impossible rather than merely unlikely.
-    default_out = f"{run_name}_tta_smoke" if args.limit else f"{run_name}_tta"
+    #
+    # The preset goes in the directory name for the same reason, and it is the same trap one
+    # step along: two presets both defaulting to `<run>_tta` would overwrite each other fold by
+    # fold, and the completeness check below cannot see it - a `wide17` fold file and a
+    # `photo13` fold file have exactly the same number of rows. A pass interrupted halfway
+    # would leave an OOF built from two different view sets, scoring somewhere between them.
+    # `default` keeps the bare name so the numbers already recorded under it still line up.
+    default_out = f"{run_name}_tta"
+    if args.views != "default":
+        default_out += f"_{args.views}"
+    if args.limit:
+        default_out += "_smoke"
     out_name = args.out_run or default_out
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

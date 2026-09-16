@@ -329,7 +329,7 @@ class TestGbmOof:
         y = (x["f0"] + rng.normal(0, 0.5, n) > 0).astype(int).to_numpy()
         folds = np.tile(np.arange(5), n // 5)
 
-        oof, models = blend.fit_gbm_oof(x, y, folds, seed=42)
+        oof = blend.fit_gbm_oof(x, y, folds, seed=42).oof
         assert oof.shape == (n,)
         assert np.isfinite(oof).all()
         assert ((oof >= 0) & (oof <= 1)).all()
@@ -341,7 +341,7 @@ class TestGbmOof:
         y = (x["f0"] * 2 + rng.normal(0, 0.5, n) > 0).astype(int).to_numpy()
         folds = np.tile(np.arange(5), n // 5)
 
-        oof, models = blend.fit_gbm_oof(x, y, folds, seed=42)
+        oof = blend.fit_gbm_oof(x, y, folds, seed=42).oof
         assert blend.competition_logloss(y, oof) < 0.5
 
     def test_finds_nothing_in_pure_noise(self) -> None:
@@ -352,5 +352,5 @@ class TestGbmOof:
         y = (rng.random(n) < 0.5).astype(int)
         folds = np.tile(np.arange(5), n // 5)
 
-        oof, models = blend.fit_gbm_oof(x, y, folds, seed=42)
+        oof = blend.fit_gbm_oof(x, y, folds, seed=42).oof
         assert blend.competition_logloss(y, oof) > 0.65
