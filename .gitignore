@@ -2,8 +2,12 @@
 # COMPETITION DATA - never commit. The rules prohibit redistributing it, and a
 # public repo would do exactly that. This block is a compliance control.
 # ---------------------------------------------------------------------------
-data/
-!data/*/.gitkeep
+# Anchored with a leading slash. A bare `data/` matches at EVERY level, so it also swallowed
+# `src/datpd/data/` — io.py, preprocess.py, dataset.py, splits.py — and the whole data pipeline
+# sat untracked for the life of the project. The competition requires winners to open-source a
+# reproducible solution; a repo missing its own preprocessing would not reproduce anything.
+/data/
+!/data/*/.gitkeep
 *.nii
 *.nii.gz
 *.dcm
@@ -27,8 +31,10 @@ reports/eda/raw/
 !reports/eda/raw/.gitkeep
 
 # Model weights - derived from the data, and large.
-models/
-!models/.gitkeep
+# Anchored, for the same reason as `/data/` above: a bare `models/` also hid
+# `src/datpd/models/` (factory.py, resnet3d.py) — the architecture the shipped weights load into.
+/models/
+!/models/.gitkeep
 submission_src/assets/*
 !submission_src/assets/.gitkeep
 *.pt
