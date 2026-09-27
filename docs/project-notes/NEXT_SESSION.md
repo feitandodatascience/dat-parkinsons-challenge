@@ -34,7 +34,7 @@ Where things stand:
 
 - Environment: .venv on Python 3.12.3, torch 2.12.1+cpu, lightgbm 4.7.0. NO CUDA GPU
   (Intel Iris Xe), so a 96³ 5-fold run is a whole night. Run everything from
-  D:\work\dat-parkinsons-challenge — the runtime repo is a sibling checkout and has
+  the repo root — the runtime repo is a sibling checkout and has
   no .venv, which is worth remembering before pasting a command into the wrong prompt.
 - Cloud GPU: ANSWERED — permitted, conditionally. The organizers gave a three-part test
   (no third-party retention / private to me / every copy deletable), not a yes. Ruled out:

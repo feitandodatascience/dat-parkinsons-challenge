@@ -1,7 +1,7 @@
 # High-resolution variant of baseline.yaml: 128^3 @ 1.5 mm.
 #
-# docs/05 ranks this the single largest available win (-0.02 to -0.05 expected) and rules it
-# unreachable at 2.4 R on CPU. It is reachable on a rented GPU; docs/07 records the compliance
+# docs/project-notes/05 ranks this the single largest available win (-0.02 to -0.05 expected) and rules it
+# unreachable at 2.4 R on CPU. It is reachable on a rented GPU; docs/project-notes/07 records the compliance
 # ruling that permits one and the conditions attached to it.
 #
 # ONLY the geometry and the dataloader worker count differ from baseline.yaml. Batch size stays

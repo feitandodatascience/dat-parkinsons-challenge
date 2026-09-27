@@ -8,9 +8,9 @@
 #
 # The compliance-relevant part is the tmpfs mount. Everything data-shaped lives in RAM, so no
 # copy of the competition data is ever written to the instance's disk. That turns "delete every
-# copy at the end of the challenge" (docs/07 condition 3) from an audit of the provider's
+# copy at the end of the challenge" (docs/project-notes/07 condition 3) from an audit of the provider's
 # retention policy into a property of how the machine was set up: terminate the instance, or
-# merely lose power, and the data is gone. See docs/07 and docs/08.
+# merely lose power, and the data is gone. See docs/project-notes/07 and docs/project-notes/08.
 
 set -euo pipefail
 
@@ -97,7 +97,7 @@ pytest -q
 say "Bootstrap complete"
 cat <<'NEXT'
 
-Next, from your LOCAL machine (docs/08 step 3):
+Next, from your LOCAL machine (docs/project-notes/08 step 3):
 
   scp data/raw/<archive>            <user>@<host>:/mnt/ram/data/raw/
   scp data/interim/folds.csv        <user>@<host>:/mnt/ram/data/interim/

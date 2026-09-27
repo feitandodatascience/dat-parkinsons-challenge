@@ -2,7 +2,7 @@
 
 **Written 2026-09-08. Deadline 2026-09-16; intended final model submitted Mon 2026-09-14.**
 
-The Phase 3 ranking in [03_plan.md](03_plan.md) was written assuming a GPU would be rented before
+The Phase 3 ranking in [03_plan.md](../03_plan.md) was written assuming a GPU would be rented before
 day 5. It has not been, so that ranking is now wrong — not because the ideas changed, but because
 the denominator did. This file re-ranks the same list by **expected log-loss gain per CPU-hour**,
 which is the only currency left.
@@ -24,7 +24,7 @@ end times, not from an estimate.
 > for exactly one epoch at run 1's settings, against the warm cache, and reports **399 s**.
 > Five folds x 30 epochs = 150 fold-epochs x 399 s = 16.6 h.
 >
-> **This blank was load-bearing, and the placeholder was wrong by 3x.** [03_plan.md](03_plan.md)
+> **This blank was load-bearing, and the placeholder was wrong by 3x.** [03_plan.md](../03_plan.md)
 > guessed ~48 h; [07_cloud_compute_compliance.md](07_cloud_compute_compliance.md) then back-derived
 > "2.4 R ~ 115 CPU-hours" from that guess, and from there "a retrain is unaffordable on CPU"
 > propagated into every Phase 3 decision and into the next-session brief. It was never checked
@@ -245,7 +245,7 @@ this file, including item 4.
 
 The pretrained-backbone route carries a second problem beyond compute: most public DaT
 checkpoints are PPMI-derived, and PPMI makes a solution prize-ineligible
-([EXTERNAL_ASSETS.md](EXTERNAL_ASSETS.md)). Any candidate needs its training provenance checked
+([EXTERNAL_ASSETS.md](../EXTERNAL_ASSETS.md)). Any candidate needs its training provenance checked
 before it is worth benchmarking.
 
 ---

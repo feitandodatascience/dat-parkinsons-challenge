@@ -7,7 +7,7 @@ Not to beat it — to disagree with it. A gradient-boosted model over a few doze
 striatal measurements makes errors in different places than a 3D convolutional network, and a
 blend of two models that disagree is worth more than either. On CPU this is also the only
 Phase 3 item that buys model diversity without retraining anything: one pass over the volumes,
-then seconds of tree fitting (docs/05).
+then seconds of tree fitting (docs/project-notes/05).
 
 The features are the quantities a nuclear medicine physician actually reads (docs/01 4-5):
 striatal uptake against a reference region, left-right asymmetry, the anterior-posterior

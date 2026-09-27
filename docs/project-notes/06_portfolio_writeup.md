@@ -3,9 +3,9 @@
 Raw material for the public write-up (GitHub README + portfolio site). Not the write-up itself —
 this is the collected record so the final version can be assembled without re-deriving anything.
 
-Sources of truth, all in-repo: [`reports/experiments/log.md`](../reports/experiments/log.md)
-(every run and every negative result), [`conf/baseline.yaml`](../conf/baseline.yaml) (the
-settings below), [`docs/03_plan.md`](03_plan.md) (the phase plan as written on day 1).
+Sources of truth, all in-repo: [`reports/experiments/log.md`](../../reports/experiments/log.md)
+(every run and every negative result), [`conf/baseline.yaml`](../../conf/baseline.yaml) (the
+settings below), [`docs/03_plan.md`](../03_plan.md) (the phase plan as written on day 1).
 
 ---
 

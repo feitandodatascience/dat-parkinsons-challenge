@@ -23,8 +23,16 @@ first.
 
 ## Index
 
-| # | date | submission | LB log loss | LB AUROC |
-|---|---|---|---:|---:|
-| 0b | 2026-09-05 | prior-only wire test | 0.6687 (smoke, fake data) | 0.500 |
-| 1 | 2026-09-08 | run 1, ResNet3D 5-fold + temperature | 0.3210 | — |
-| 2 | 2026-09-09 | [TTA (9 views) + SBR/lightgbm blend](002_2026-09-09_tta_blend.md) | **0.2973** | **0.9396** |
+Private scores were published after the competition closed on 2026-09-16.
+
+| # | date | platform id | submission | public LB | private LB | public AUROC |
+|---|---|---|---|---:|---:|---:|
+| 0b | 2026-09-05 | — | prior-only wire test | 0.6687 (smoke, fake data) | — | 0.500 |
+| 1 | 2026-09-08 | 321492 | run 1, ResNet3D 5-fold + temperature | 0.3210 | 0.3767 | — |
+| 2 | 2026-09-09 | 321564 | [TTA (9 views) + SBR/lightgbm blend](002_2026-09-09_tta_blend.md) | 0.2973 | 0.3573 | 0.9396 |
+| 3 | 2026-09-16 | 322664 | candidate A: 157 repaired features, tuned booster (log row 9) | 0.2935 | 0.3476 | — |
+| 4 | 2026-09-16 | 322850 | **candidate B**: + aug_rich CNN run, 10 CNNs (log row 10) | **0.2855** | 0.3448 | — |
+| 5 | 2026-09-16 | 322889 | candidate C: candidate B + tuned booster (log row 12) | 0.2871 | **0.3447** | — |
+
+Platform logs were kept verbatim for submission 2 only. Submissions 3–5 are recorded by their
+scores and their rows in `../experiments/log.md`.

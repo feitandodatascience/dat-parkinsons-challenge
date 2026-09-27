@@ -303,7 +303,7 @@ not fit the remaining window, so the conclusion stands — but a retrain at 96³
 all along, and that retrain became half of the final build (§5.2). Expected gain −0.02 to −0.05, which
 would very likely have made it the single largest improvement in the project.
 
-Renting GPU compute was cleared with the organizers (see `docs/07_cloud_compute_compliance.md` for
+Renting GPU compute was cleared with the organizers (see `docs/project-notes/07_cloud_compute_compliance.md` for
 the ruling and its three conditions) and would have reduced this to ~4 hours. It was not taken up
 in time. `conf/highres.yaml` is written and ready.
 
@@ -414,7 +414,7 @@ Aggregate reports under `reports/` are the only channel from data to model-facin
 
 The organizers' guidance on this ("some coding assistants read local files by default, so
 competitors should check what a given tool has access to") is exactly what that arrangement
-addresses. `docs/07_cloud_compute_compliance.md` records the ruling in full.
+addresses. `docs/project-notes/07_cloud_compute_compliance.md` records the ruling in full.
 
 ### 6.4 Licence
 

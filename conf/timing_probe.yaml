@@ -1,7 +1,7 @@
 # Not an experiment. A stopwatch.
 #
-# docs/05 prices every Phase 3 decision in R = wall-clock hours for one full 5-fold run of
-# baseline.yaml, and R was never filled in — docs/07 back-derives it as ~48 CPU-hours from a
+# docs/project-notes/05 prices every Phase 3 decision in R = wall-clock hours for one full 5-fold run of
+# baseline.yaml, and R was never filled in — docs/project-notes/07 back-derives it as ~48 CPU-hours from a
 # "2.4 R ~ 115 CPU-hours" remark. Every "we cannot afford to retrain" conclusion in this project
 # rests on that one un-measured number, and on 2026-09-15 it is the number deciding whether a
 # new augmentation recipe can be tested at all before the deadline.

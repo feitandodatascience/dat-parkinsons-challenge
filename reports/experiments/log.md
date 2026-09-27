@@ -27,6 +27,25 @@ Rules for this file:
 | 9 | 2026-09-16 | `baseline.yaml` | | **SBR features repaired + extended (61 -> 157), booster tuned**, on run 1's TTA predictions | **0.2929** | - | - | - | **0.2935** | **yes - shipped** | vs the shipped stack's 0.3038 under the identical procedure: **-0.0109**. Splits into -0.0066 (features) and -0.0043 (tuning; 2.1 sigma, CI [-0.0083, -0.0002]). Trees alone 0.3920 -> **0.3659**; rho rose 0.798 -> 0.825, so the gain is tree quality, not diversity. Tuning is **nested** (inner 3-fold inside each outer fold), so the figure is not optimistic on that count. Bagging x5 helped the default booster (-0.0017) but **hurt the tuned one** (0.2929 -> 0.2931). Ablation on a 61-column subset reproduces 0.3038 exactly, and tuning there is worth -0.0005 at 0.5 sigma - **tuning only pays on the repaired features**, so the whole gain traces to the feature work. **LB 0.2973 -> 0.2935 (-0.0038)** against -0.0109 on CV; 15 min on the platform, 5+5 assets loaded, no fallbacks, zero filtered lines |
 | 10 | 2026-09-16 | `aug_rich.yaml` | | **richer augmentation retrain** (elastic, PSF blur, signed gamma, count noise, mixup) ensembled with run 1, both with 9-view TTA, + 157-feature trees | **0.2841** | - | 0.9455 | - | packaged | **yes** | aug_rich ALONE is worse: OOF 0.3358 vs run 1's 0.3271 uncalibrated, though ECE 0.0264 vs 0.0404 (mixup calibrates). But **rho = 0.9135** vs 0.974 for a same-recipe second run, and the CNN ensemble is -0.0153 (2.9 sigma, AUROC +0.0087) calibrated. Full stack vs candidate A, both re-calibrated: **-0.0101, 2.4 sigma, CI [-0.0185, -0.0017]**, 60.1% improved. Tuning NOT promoted on this stack (-0.0020, 1.3 sigma). Every fold peaked at epochs 15-21 of 30, so early stopping off was right. The augmentation did not make a better model; it made a usefully different one |
 | 11 | 2026-09-16 | `baseline.yaml` | | **wide17 TTA** (17 views, strict superset of the 9) on run 1's checkpoints | 0.3195 | - | 0.9282 | - | not submitted | **no** | paired vs 9-view: **-0.0001, 0.2 sigma, CI [-0.0005, +0.0004]**. A tight null, not an unresolved one: the SE is 0.0002, so it rules out anything worth a slot. The aug_rich pass was stopped at this checkpoint rather than spending 80 min to confirm it. **Candidate B (LB 0.2855) is final; the last submission slot was left unused on purpose** |
+| 12 | 2026-09-16 | `baseline.yaml` + `aug_rich.yaml` | 167df17 | **candidate C**: candidate B with the tuned booster, forced past the acceptance rule with `09_blend.py --ship` | **0.2821** | - | - | - | **0.2871** | submitted | corrects row 11: the last slot *was* used, because an unused slot on deadline day is worth nothing. CV said -0.0020 at 1.3 sigma, unresolved. Public board said +0.0016 (worse than B), private said -0.0001: a null, as predicted |
+
+### Final private leaderboard (competition closed 2026-09-16, recorded 2026-09-27)
+
+| row | submission | OOF | public | private | private − public |
+|---:|---|---:|---:|---:|---:|
+| 1 | baseline | 0.3186 | 0.3210 | 0.3767 | +0.0557 |
+| 5 | TTA + SBR blend | 0.3061 | 0.2973 | 0.3573 | +0.0600 |
+| 9 | candidate A | 0.2929 | 0.2935 | 0.3476 | +0.0541 |
+| 10 | **candidate B** | 0.2841 | **0.2855** | 0.3448 | +0.0593 |
+| 12 | candidate C | 0.2821 | 0.2871 | **0.3447** | +0.0576 |
+
+**Final rank #159 / 1009** (top 16%).
+
+Every submission improved on the one before it on the private board, so the ordering OOF gave was
+right. The absolute level was not: the private split is harder by +0.054 to +0.060 for **every**
+build, against the ±0.01 OOF→public band this file relied on. A near-constant shift means the
+decisions were sound. It also means that band described the public split, not test data in
+general. Write-up: [`WRITEUP.md`](../../WRITEUP.md).
 
 **Run 1 packaged 2026-09-08**: `submission.zip`, 37.9 MB, 5 fold checkpoints ensembled in logit
 space. All pre-flight checks passed, including the new one that loads every shipped checkpoint

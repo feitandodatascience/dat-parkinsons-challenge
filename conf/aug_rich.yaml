@@ -2,9 +2,9 @@
 #
 # WHY THIS RUN EXISTS
 # -------------------
-# docs/05 priced a full 5-fold run at "R", left R unmeasured, and every "we cannot afford to
+# docs/project-notes/05 priced a full 5-fold run at "R", left R unmeasured, and every "we cannot afford to
 # retrain" decision in this project inherited that blank. Measured on 2026-09-15: one fold-epoch
-# is 399 s, so R = 16.6 h, not the ~48 h docs/07 back-derived. A retrain fits before the
+# is 399 s, so R = 16.6 h, not the ~48 h docs/project-notes/07 back-derived. A retrain fits before the
 # deadline; 128^3 @ 1.5 mm (2.37x the voxels, 39.4 h) still does not, and is now closed on a
 # measured basis rather than an estimated one.
 #

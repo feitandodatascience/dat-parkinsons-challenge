@@ -4,7 +4,21 @@ Solution repository for the [DrivenData DaT Parkinson's Challenge](https://www.d
 — binary classification of dopamine transporter (DaT) SPECT brain scans as normal or abnormal,
 across a multicentre French dataset from ten hospitals.
 
-**Metric:** log loss · **Deadline:** 2026-09-16 23:59 UTC · **Submission:** code execution
+**Metric:** log loss · **Closed:** 2026-09-16 · **Submission:** code execution
+
+## Result
+
+**Final rank: #159 / 1009** (top 16%) on the private leaderboard.
+
+| | Public LB | Private LB |
+|---|---:|---:|
+| First model (3D ResNet baseline) | 0.3210 | 0.3767 |
+| Best public — candidate B (10 CNNs + TTA, stacked with LightGBM on SBR features) | **0.2855** | 0.3448 |
+| Best private — candidate C (candidate B with a tuned booster) | 0.2871 | **0.3447** |
+
+**Read [WRITEUP.md](WRITEUP.md)** for the short story: all five submissions, what the private
+leaderboard showed, and what I would change. The full technical record is
+[docs/SOLUTION.md](docs/SOLUTION.md).
 
 ---
 
@@ -29,6 +43,8 @@ Nothing under `data/` is ever committed.
 
 | Doc | What it gives you |
 |---|---|
+| [WRITEUP.md](WRITEUP.md) | The short version: results, lessons, what I'd do differently |
+| [docs/SOLUTION.md](docs/SOLUTION.md) | The full solution: pipeline, every decision with its evidence, reproduction |
 | [docs/01 — Domain primer](docs/01_domain_primer_dat_scans.md) | What a DaT scan is, from zero. **Read this first** if the domain is new. |
 | [docs/02 — MNIST → 3D medical imaging](docs/02_cv_for_3d_medical_imaging.md) | The seven things that change when you leave 2D |
 | [docs/00 — Competition brief](docs/00_competition_brief.md) | Rules, metric, submission format, runtime constraints |
@@ -130,8 +146,10 @@ before submitting.
 ## Layout
 
 ```
+WRITEUP.md             short results write-up
 CLAUDE.md              project rules for Claude Code — data policy lives in §0
-docs/                  briefs, domain primer, plan
+docs/                  guides 00–04 (+ _vn translations), SOLUTION.md, EXTERNAL_ASSETS.md
+docs/project-notes/    frozen working notes: compute budget, GPU runbook, compliance ruling
 conf/                  YAML experiment configs
 src/datpd/             the package: io, preprocess, splits, models, metrics, calibration
 scripts/               CLI entry points you run
@@ -140,6 +158,7 @@ tests/                 synthetic-data tests + guardrail tests
 reports/eda/raw/       QUARANTINE — Claude-blocked, git-ignored
 reports/eda/shared/    user-vetted aggregates — Claude may read
 reports/experiments/   one row per experiment
+reports/submissions/   platform logs and scores, one file per submission
 data/                  git-ignored, Claude-blocked
 ```
 
