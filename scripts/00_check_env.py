@@ -67,8 +67,10 @@ def main() -> int:
     hook = REPO_ROOT / ".claude" / "hooks" / "guard_data.py"
     gitignore = REPO_ROOT / ".gitignore"
     ok = True
-    ok &= check("permission deny rules present", settings.exists())
-    ok &= check("data guard hook present", hook.exists())
+    # .claude/ is local-only (not published), so a public clone reports these as absent.
+    local_only = "local-only, not in the public repo"
+    ok &= check("permission deny rules present", settings.exists(), "" if settings.exists() else local_only)
+    ok &= check("data guard hook present", hook.exists(), "" if hook.exists() else local_only)
     ok &= check(
         "data/ is git-ignored",
         gitignore.exists() and "data/" in gitignore.read_text(encoding="utf-8"),

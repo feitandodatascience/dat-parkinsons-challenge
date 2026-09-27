@@ -20,7 +20,7 @@ Three independent layers, so that no single mistake is sufficient:
 |---|---|---|
 | Permission deny rules | `.claude/settings.json` | `Read`/`Grep`/`Glob` on `data/`, `reports/eda/raw/`, `models/`, and by extension (`*.nii.gz`, `*.pt`, ...) |
 | PreToolUse hook | `.claude/hooks/guard_data.py` | Bash bypasses a path rule can't see: `cat`, `head`, `strings`, `xxd`, `zcat`, `python -c "print(df.head())"` |
-| Behavioural rule | [CLAUDE.md](../CLAUDE.md) §0 | What tooling can't see — you pasting data into chat, a subagent being asked to peek |
+| Behavioural rule | `CLAUDE.md` §0 | What tooling can't see — you pasting data into chat, a subagent being asked to peek |
 | Git ignore | `.gitignore` | Committing data to a repo that will become public under MIT |
 
 The hook is tested. `tests/test_guard_hook.py` asserts 47 cases — every bypass listed above is
@@ -162,5 +162,5 @@ change anything in my preprocessing.
   `permissions.deny` in settings, `.gitignore`, and CLAUDE.md §0.
 - If Claude ever produces output that appears to contain data values, stop, and check which
   layer failed. Add a test case for it.
-- `.claude/settings.json` is committed on purpose — the guardrails are part of the solution and
-  should be reviewable by anyone auditing it, including DrivenData.
+- `CLAUDE.md` and `.claude/` are kept local and are not published in the public repository.
+  This document describes what they contain.

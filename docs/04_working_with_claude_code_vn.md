@@ -20,7 +20,7 @@ Ba lớp độc lập, để không một sai sót đơn lẻ nào là đủ đ�
 |---|---|---|
 | Quy tắc deny quyền truy cập | `.claude/settings.json` | `Read`/`Grep`/`Glob` vào `data/`, `reports/eda/raw/`, `models/`, và theo phần mở rộng file (`*.nii.gz`, `*.pt`, ...) |
 | Hook PreToolUse | `.claude/hooks/guard_data.py` | Các đường vòng qua Bash mà quy tắc theo đường dẫn không thấy được: `cat`, `head`, `strings`, `xxd`, `zcat`, `python -c "print(df.head())"` |
-| Quy tắc hành vi | [CLAUDE.md](../CLAUDE.md) §0 | Những gì công cụ không thấy được — bạn dán dữ liệu vào cuộc trò chuyện, hay một subagent được nhờ liếc nhìn hộ |
+| Quy tắc hành vi | `CLAUDE.md` §0 | Những gì công cụ không thấy được — bạn dán dữ liệu vào cuộc trò chuyện, hay một subagent được nhờ liếc nhìn hộ |
 | Git ignore | `.gitignore` | Việc commit dữ liệu vào một repo rồi sẽ trở thành công khai theo giấy phép MIT |
 
 Hook này đã được kiểm thử. `tests/test_guard_hook.py` khẳng định 47 trường hợp — mọi đường vòng
@@ -165,5 +165,5 @@ liệu nó có nên làm thay đổi điều gì trong khâu tiền xử lý c�
   hook, `permissions.deny` trong settings, `.gitignore`, và CLAUDE.md §0.
 - Nếu Claude bao giờ tạo ra output có vẻ chứa giá trị dữ liệu, hãy dừng lại và kiểm tra xem lớp
   nào đã thất bại. Thêm một test case cho tình huống đó.
-- `.claude/settings.json` được commit một cách có chủ đích — các hàng rào bảo vệ là một phần của
-  lời giải và cần được bất kỳ ai kiểm tra lại, kể cả DrivenData.
+- `CLAUDE.md` và `.claude/` được giữ ở máy cục bộ và không được công bố trong repo công khai.
+  Tài liệu này mô tả nội dung của chúng.

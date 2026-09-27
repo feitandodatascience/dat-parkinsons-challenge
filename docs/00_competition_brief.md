@@ -167,7 +167,7 @@ Only what is already in the image. The notable ones: `torch==2.12.1+cu129`, `tor
 `torchio==1.2.1`, `monai`, `nibabel`, `simpleitk`, `antspyx`, `pytorch-lightning`, `timm`,
 `transformers`, `scikit-learn`, `scipy`, `numpy`, `pandas`, `polars`, `xgboost`, `lightgbm`,
 `opencv-python-headless`, `einops`, `matplotlib`, `loguru`, `tensorflow`. Full list in
-[CLAUDE.md §3](../CLAUDE.md). A missing import is a failed submission.
+`CLAUDE.md §3`. A missing import is a failed submission.
 
 New dependencies require a PR to the runtime repo — with the deadline where it is, assume that
 is not an option.
@@ -220,7 +220,7 @@ redistributing or otherwise making the Data available to any party not participa
 individuals.
 
 Claude Code is a third-party AI service. That is the whole reason for the guardrails in
-[CLAUDE.md](../CLAUDE.md) §0, the deny rules in `.claude/settings.json`, and the hook in
+`CLAUDE.md` §0, the deny rules in `.claude/settings.json`, and the hook in
 `.claude/hooks/guard_data.py`. Claude writes the code; you run it; Claude reads only the
 aggregates you promote.
 

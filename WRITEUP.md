@@ -91,7 +91,7 @@ adopted mid-project: an out-of-fold margin under ~0.01 is unresolved, not won.
 The code was written with an AI coding assistant under a hard constraint: competition rules forbid
 sharing the data with third-party AI services. Three layers enforced that the assistant wrote code
 and never read the data: permission deny rules, a `PreToolUse` hook with its own test suite, and
-the behavioural rules in [CLAUDE.md](CLAUDE.md) §0. Only aggregate, user-vetted summaries crossed
+the behavioural rules in `CLAUDE.md` §0. Only aggregate, user-vetted summaries crossed
 from the data to the assistant. No external data or pretrained weights were used. PPMI in
 particular was excluded by the organizers.
 

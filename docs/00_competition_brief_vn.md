@@ -134,7 +134,7 @@ Chỉ được dùng những gì đã có sẵn trong image. Những cái đáng
 `torchvision`, `torchio==1.2.1`, `monai`, `nibabel`, `simpleitk`, `antspyx`,
 `pytorch-lightning`, `timm`, `transformers`, `scikit-learn`, `scipy`, `numpy`, `pandas`,
 `polars`, `xgboost`, `lightgbm`, `opencv-python-headless`, `einops`, `matplotlib`, `loguru`,
-`tensorflow`. Danh sách đầy đủ nằm trong [CLAUDE.md §3](../CLAUDE.md). Một import bị thiếu đồng
+`tensorflow`. Danh sách đầy đủ nằm trong `CLAUDE.md §3`. Một import bị thiếu đồng
 nghĩa với một bài nộp thất bại.
 
 Thư viện mới đòi hỏi phải gửi PR vào repo runtime — với thời hạn như hiện tại, hãy coi như đó
@@ -191,7 +191,7 @@ nêu đích danh các dịch vụ AI của bên thứ ba**. Bạn cũng không �
 định danh cá nhân người bệnh.
 
 Claude Code là một dịch vụ AI của bên thứ ba. Đó chính là toàn bộ lý do tồn tại của các hàng rào
-bảo vệ trong [CLAUDE.md](../CLAUDE.md) §0, các quy tắc deny trong `.claude/settings.json`, và
+bảo vệ trong `CLAUDE.md` §0, các quy tắc deny trong `.claude/settings.json`, và
 hook trong `.claude/hooks/guard_data.py`. Claude viết code; bạn chạy code; Claude chỉ đọc những
 số liệu tổng hợp mà bạn đã duyệt và chuyển lên.
 

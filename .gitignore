@@ -89,5 +89,8 @@ Thumbs.db
 .vscode/*
 !.vscode/settings.json
 
-# Claude Code local overrides (keep the shared settings.json in git)
-.claude/settings.local.json
+# Claude Code files: the assistant rules (CLAUDE.md) and the data guard (.claude/ - deny rules and
+# PreToolUse hook) are kept locally and not published. Tests that need the hook skip without it.
+CLAUDE.md
+CLAUDE.local.md
+.claude/

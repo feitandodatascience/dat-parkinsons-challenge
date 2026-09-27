@@ -15,6 +15,9 @@ import pytest
 
 HOOK = Path(__file__).resolve().parents[1] / ".claude" / "hooks" / "guard_data.py"
 
+# The hook lives in .claude/, which is kept local and not published; a public clone has no hook to test.
+pytestmark = pytest.mark.skipif(not HOOK.exists(), reason="data guard hook is local-only (.claude/)")
+
 
 def run_hook(tool_name: str, tool_input: dict) -> bool:
     """Return True if the hook denies the call."""

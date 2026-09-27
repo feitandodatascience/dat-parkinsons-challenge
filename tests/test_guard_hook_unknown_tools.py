@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import pytest
 
-from .test_guard_hook import run_hook
+from .test_guard_hook import HOOK, run_hook
+
+pytestmark = pytest.mark.skipif(not HOOK.exists(), reason="data guard hook is local-only (.claude/)")
 
 MUST_BLOCK_UNKNOWN_TOOL = [
     # A Kaggle server, whatever its argument names turn out to be.

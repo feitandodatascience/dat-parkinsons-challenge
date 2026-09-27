@@ -28,8 +28,11 @@ leaderboard showed, and what I would change. The full technical record is
 This is a DrivenData rule; breaking it means disqualification.
 
 This repo enforces it in four independent layers — permission deny rules, a `PreToolUse` hook,
-`.gitignore`, and the behavioural rules in [CLAUDE.md](CLAUDE.md) §0. The hook is covered by
+`.gitignore`, and the behavioural rules in `CLAUDE.md` §0. The hook is covered by
 47 tests in [tests/test_guard_hook.py](tests/test_guard_hook.py).
+
+`CLAUDE.md` and `.claude/` (deny rules and hook) are kept locally and are not published here;
+[docs/04](docs/04_working_with_claude_code.md) describes them, and the hook tests skip without them.
 
 The workflow is: **Claude writes the analysis script → you run it → you promote aggregate,
 non-identifying summaries to `reports/eda/shared/` → Claude reads those.** Details in
@@ -147,7 +150,6 @@ before submitting.
 
 ```
 WRITEUP.md             short results write-up
-CLAUDE.md              project rules for Claude Code — data policy lives in §0
 docs/                  guides 00–04 (+ _vn translations), SOLUTION.md, EXTERNAL_ASSETS.md
 docs/project-notes/    frozen working notes: compute budget, GPU runbook, compliance ruling
 conf/                  YAML experiment configs
